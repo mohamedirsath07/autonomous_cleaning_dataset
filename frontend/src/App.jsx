@@ -116,6 +116,12 @@ function App() {
       });
       setCleanResult(res.data);
       fetchRuns(); // Refresh history
+      
+      // Scroll to results
+      setTimeout(() => {
+        document.getElementById('results-section')?.scrollIntoView({ behavior: 'smooth' });
+      }, 100);
+      
     } catch (err) {
       console.error(err);
       setError(err.response?.data?.message || "An error occurred during cleaning.");
@@ -145,82 +151,164 @@ function App() {
   };
 
   return (
-    <div className="container">
+    <div className="app-container">
       <header className="app-header">
-        <h1>Autonomous Data Preparation Engine</h1>
+        <div className="logo-area">
+          <span className="logo-icon">✨</span>
+          <span className="app-title">DataForge</span>
+        </div>
         <button 
-          className="history-btn" 
+          className="history-toggle" 
           onClick={() => setShowHistory(!showHistory)}
         >
-          {showHistory ? 'Hide History' : 'View History'} ({runs.length})
+          📜 History ({runs.length})
         </button>
       </header>
       
-      {showHistory && (
-        <div className="history-section">
-          <h2>Pipeline Run History</h2>
-          <div className="history-list">
-            {runs.map(run => (
-              <div key={run._id} className="history-item">
-                <div>
-                  <strong>{run.dataset_id?.name || 'Unknown'}</strong>
-                  <p>{new Date(run.created_at).toLocaleString()}</p>
-                  <p className="small-text">{run.transformation_log.length} transformations</p>
-                </div>
-                <button onClick={() => downloadFile(run._id)} className="btn-small">
-                  Download
-                </button>
+      <div className={`history-sidebar ${showHistory ? 'open' : ''}`}>
+        <button className="close-btn" onClick={() => setShowHistory(false)}>&times;</button>
+        <h2>Pipeline History</h2>
+        <div className="history-list">
+          {runs.map(run => (
+            <div key={run._id} className="history-item">
+              <div>
+                <strong>{run.dataset_id?.name || 'Unknown Dataset'}</strong>
+                <p style={{fontSize: '0.8rem', color: 'var(--text-secondary)'}}>{new Date(run.created_at).toLocaleString()}</p>
+                <p className="small-text">{run.transformation_log.length} transformations</p>
               </div>
-            ))}
-            {runs.length === 0 && <p>No runs yet</p>}
-          </div>
+              <button 
+                onClick={() => downloadFile(run._id)} 
+                className="btn-secondary"
+                style={{marginTop: '0.5rem', width: '100%', fontSize: '0.8rem'}}
+              >
+                Download Result
+              </button>
+            </div>
+          ))}
+          {runs.length === 0 && <p style={{color: 'var(--text-secondary)', textAlign: 'center'}}>No runs yet.</p>}
+        </div>
+      </div>
+      
+      {!profile && !cleanResult && (
+        <div className="hero-section fade-in">
+          <h1 className="hero-title">Autonomous Data Cleaning</h1>
+          <p className="hero-subtitle">
+            Upload your messy dataset and let our AI-powered engine profile, clean, and generate production-ready Python pipelines for you.
+          </p>
         </div>
       )}
-      
-      <div className="upload-section">
-        <input type="file" onChange={handleFileChange} accept=".csv,.xlsx,.xls" />
-        <button onClick={handleUpload} disabled={uploading || !file}>
-          {uploading ? 'Processing...' : 'Upload & Analyze'}
-        </button>
+
+      <div className="upload-section fade-in">
+        {!profile ? (
+          <div className="upload-card">
+            <div className="file-input-wrapper">
+              <input 
+                type="file" 
+                className="file-input" 
+                onChange={handleFileChange} 
+                accept=".csv,.xlsx,.xls" 
+              />
+              <div style={{pointerEvents: 'none'}}>
+                <div style={{fontSize: '3rem', marginBottom: '1rem'}}>📂</div>
+                <h3 style={{marginBottom: '0.5rem', color: 'var(--text-main)'}}>
+                  {file ? file.name : "Drag & Drop or Click to Upload"}
+                </h3>
+                <p style={{color: 'var(--text-secondary)'}}>Supports CSV and Excel files</p>
+              </div>
+            </div>
+            
+            {file && (
+              <div style={{marginTop: '2rem'}}>
+                <button 
+                  className="upload-btn" 
+                  onClick={handleUpload} 
+                  disabled={uploading}
+                >
+                  {uploading ? 'Analyzing Dataset...' : 'Start Profiling 🚀'}
+                </button>
+              </div>
+            )}
+          </div>
+        ) : (
+          <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2rem'}}>
+            <div>
+              <h2 style={{margin: 0, color: 'var(--text-main)'}}>Current Dataset: {dataset?.name}</h2>
+              <p style={{color: 'var(--text-secondary)'}}>Ready for pipeline configuration</p>
+            </div>
+            <button 
+              className="btn-secondary"
+              onClick={() => {
+                setProfile(null);
+                setDataset(null);
+                setFile(null);
+                setCleanResult(null);
+              }}
+            >
+              Upload New File
+            </button>
+          </div>
+        )}
       </div>
 
-      {error && <div className="error">{error}</div>}
+      {error && (
+        <div style={{
+          background: 'rgba(239, 68, 68, 0.1)', 
+          color: '#ef4444', 
+          padding: '1rem', 
+          borderRadius: '0.5rem', 
+          marginBottom: '2rem',
+          border: '1px solid #ef4444'
+        }}>
+          🚨 {error}
+        </div>
+      )}
 
       {profile && (
-        <div className="profile-section">
-          <h2>Data Profile</h2>
-          <div className="stats">
-            <p><strong>Rows:</strong> {profile.rows}</p>
-            <p><strong>Columns:</strong> {profile.columns.length}</p>
+        <div className="profile-section fade-in">
+          <div className="section-header">
+            <h2 className="section-title">Data Profile & Pipeline Builder</h2>
+            <div className="stats-bar">
+              <div className="stat-item">Rows <span className="stat-value">{profile.rows}</span></div>
+              <div className="stat-item">Columns <span className="stat-value">{profile.columns.length}</span></div>
+            </div>
           </div>
 
-          <h3>Column Analysis & Pipeline Builder</h3>
           <div className="columns-grid">
             {profile.columns.map((col) => (
               <div key={col.name} className={`column-card ${col.issues?.length > 0 ? 'has-issues' : ''}`}>
-                <div className="column-header">
-                  <h4>{col.name}</h4>
-                  <span className="badge">{col.inferred_type}</span>
+                <div className="col-header">
+                  <span className="col-name">{col.name}</span>
+                  <span className="col-type">{col.inferred_type}</span>
                 </div>
                 
                 {col.issues && col.issues.length > 0 && (
-                  <div className="issues-badge">
-                    ⚠️ Issues: {col.issues.join(', ')}
+                  <div className="issue-tag">
+                    ⚠️ {col.issues[0]} {col.issues.length > 1 && `+${col.issues.length - 1} more`}
                   </div>
                 )}
                 
-                <div className="col-stats">
-                  <p>Missing: {col.missing_pct.toFixed(1)}%</p>
-                  <p>Unique: {col.unique}</p>
+                <div className="col-details">
+                  <div className="col-detail-row">
+                    <span>Missing</span>
+                    <strong>{col.missing_pct.toFixed(1)}%</strong>
+                  </div>
+                  <div className="col-detail-row">
+                    <span>Unique</span>
+                    <strong>{col.unique}</strong>
+                  </div>
                   {col.inferred_type === 'numeric' && (
-                    <div className="numeric-stats">
-                      <small>Min: {col.min}</small>
-                      <small>Max: {col.max}</small>
-                      <small>Mean: {col.mean?.toFixed(2)}</small>
+                    <>
+                      <div className="col-detail-row">
+                        <span>Mean</span>
+                        <strong>{col.mean?.toFixed(2)}</strong>
+                      </div>
                       {col.outliers_count > 0 && (
-                        <small className="warning">⚠️ Outliers: {col.outliers_count}</small>
+                        <div className="col-detail-row" style={{color: '#f59e0b'}}>
+                          <span>Outliers</span>
+                          <strong>{col.outliers_count}</strong>
+                        </div>
                       )}
-                    </div>
+                    </>
                   )}
                 </div>
 
@@ -229,21 +317,21 @@ function App() {
                   onChange={(e) => handleActionChange(col.name, e.target.value)}
                   value={pipelineSteps[col.name] ? `${pipelineSteps[col.name].action}:${pipelineSteps[col.name].method || ''}` : ""}
                 >
-                  <option value="">Select Action...</option>
-                  <option value="drop:">Drop Column</option>
+                  <option value="">No Action</option>
+                  <option value="drop:">🗑️ Drop Column</option>
                   {col.inferred_type === 'numeric' && (
                     <>
-                      <option value="impute:mean">Impute Mean</option>
-                      <option value="impute:median">Impute Median</option>
-                      <option value="scale:standard">Standard Scale</option>
-                      <option value="scale:minmax">MinMax Scale</option>
+                      <option value="impute:mean">📊 Impute Mean</option>
+                      <option value="impute:median">📊 Impute Median</option>
+                      <option value="scale:standard">📏 Standard Scale</option>
+                      <option value="scale:minmax">📏 MinMax Scale</option>
                     </>
                   )}
                   {(col.inferred_type === 'text' || col.inferred_type === 'object') && (
                     <>
-                      <option value="impute:mode">Impute Mode</option>
-                      <option value="encode:onehot">One-Hot Encode</option>
-                      <option value="encode:label">Label Encode</option>
+                      <option value="impute:mode">📊 Impute Mode</option>
+                      <option value="encode:onehot">🔠 One-Hot Encode</option>
+                      <option value="encode:label">🏷️ Label Encode</option>
                     </>
                   )}
                 </select>
@@ -251,38 +339,41 @@ function App() {
             ))}
           </div>
 
-          <div style={{textAlign: 'center'}}>
-            <button className="clean-button" onClick={handleClean} disabled={cleaning}>
-              {cleaning ? 'Running Pipeline...' : 'Run Cleaning Pipeline'}
+          <div className="action-bar fade-in">
+            <button className="run-btn" onClick={handleClean} disabled={cleaning}>
+              {cleaning ? 'Running Pipeline...' : ' Run Cleaning Pipeline'}
             </button>
           </div>
 
           {cleanResult && (
-            <div className="results-section">
-              <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px'}}>
-                <h2>Cleaning Results</h2>
-                <div style={{display: 'flex', gap: '10px'}}>
+            <div id="results-section" className="results-container">
+              <div className="results-header">
+                <div>
+                  <h2 style={{margin: 0}}>🎉 Cleaning Complete!</h2>
+                  <p style={{color: '#666'}}>Your data has been transformed successfully.</p>
+                </div>
+                <div className="btn-group">
                   <button 
-                    className="download-btn"
+                    className="btn-primary"
                     onClick={() => downloadFile(cleanResult.run_id)}
                   >
-                    Download Cleaned Dataset
+                    📥 Download Cleaned Data
                   </button>
                   <button 
-                    className="code-btn"
+                    className="btn-secondary"
                     onClick={() => setShowPythonCode(!showPythonCode)}
                   >
-                    {showPythonCode ? 'Hide' : 'Show'} Python Code
+                    {showPythonCode ? 'Hide Code' : 'Show Python Code'}
                   </button>
                 </div>
               </div>
               
               {showPythonCode && cleanResult.python_code && (
-                <div className="python-code-section">
-                  <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center'}}>
-                    <h3>Reproducible Python Code</h3>
-                    <button className="copy-btn" onClick={copyPythonCode}>
-                      Copy Code
+                <div className="fade-in">
+                  <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem'}}>
+                    <h3>Generated Python Pipeline</h3>
+                    <button className="btn-secondary" style={{fontSize: '0.8rem'}} onClick={copyPythonCode}>
+                      📋 Copy
                     </button>
                   </div>
                   <pre className="code-block">
@@ -290,57 +381,44 @@ function App() {
                   </pre>
                 </div>
               )}
-              
-              <p><strong>Cleaned File:</strong> {cleanResult.cleaned_file_path}</p>
+
+              {cleanResult.preview && cleanResult.preview.length > 0 && (
+                <div className="fade-in" style={{marginTop: '2rem'}}>
+                  <h3>Cleaned Data Preview (First 20 Rows)</h3>
+                  <div className="table-container">
+                    <table className="data-table">
+                      <thead>
+                        <tr>
+                          {cleanResult.columns.map((col) => (
+                            <th key={col}>{col}</th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {cleanResult.preview.map((row, idx) => (
+                          <tr key={idx}>
+                            {cleanResult.columns.map((col) => (
+                              <td key={`${idx}-${col}`}>
+                                {row[col] !== null ? String(row[col]) : <span style={{color: '#ccc'}}>null</span>}
+                              </td>
+                            ))}
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
               
               <h3>Transformation Log</h3>
               <div className="log-list">
                 {cleanResult.transformation_log.map((log, i) => (
-                  <div key={i} className="log-item">✅ {log}</div>
+                  <div key={i} className="log-item">
+                    <span style={{color: '#10b981'}}>✓</span> {log}
+                  </div>
                 ))}
-                {cleanResult.transformation_log.length === 0 && <p>No transformations applied.</p>}
-              </div>
-
-              <h3>Preview (Cleaned)</h3>
-              <div className="table-wrapper">
-                <table>
-                  <thead>
-                    <tr>
-                      {cleanResult.columns.map(col => <th key={col}>{col}</th>)}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {cleanResult.preview.map((row, i) => (
-                      <tr key={i}>
-                        {cleanResult.columns.map(col => <td key={col}>{row[col] !== null ? row[col].toString() : ''}</td>)}
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
               </div>
             </div>
-          )}
-
-          {!cleanResult && (
-            <>
-              <h3>Preview (Raw)</h3>
-              <div className="table-wrapper">
-                <table>
-                  <thead>
-                    <tr>
-                      {profile.columns.map(col => <th key={col.name}>{col.name}</th>)}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {profile.preview.map((row, i) => (
-                      <tr key={i}>
-                        {profile.columns.map(col => <td key={col.name}>{row[col.name]}</td>)}
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </>
           )}
         </div>
       )}
