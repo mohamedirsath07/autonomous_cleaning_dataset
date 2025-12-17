@@ -1043,6 +1043,402 @@ def generate_pipeline_code(file_path: str, actions: Dict[str, Any], manual_steps
     return "\n".join(code_lines)
 
 
+# ========== ADVANCED PIPELINE OPERATIONS ==========
+
+class PipelineRequest(BaseModel):
+    file_path: str
+    operation_type: str  # clean_only, split, clean_and_split, cross_validation, clean_and_cv
+    test_size: Optional[float] = 0.2
+    n_folds: Optional[int] = 5
+    shuffle: Optional[bool] = True
+    random_state: Optional[int] = 42
+    cleaning_pipeline: Optional[Dict[str, Any]] = None
+
+
+def apply_cleaning_pipeline(df: pd.DataFrame, steps: List[Dict[str, Any]], log: List[str]) -> pd.DataFrame:
+    """Apply cleaning transformations to dataframe"""
+    from sklearn.impute import SimpleImputer
+    from sklearn.preprocessing import StandardScaler, MinMaxScaler, LabelEncoder
+    
+    for step in steps:
+        column = step.get('column')
+        action = step.get('action')
+        method = step.get('method')
+        
+        if not column or column not in df.columns:
+            continue
+            
+        if action == 'drop':
+            df = df.drop(columns=[column])
+            log.append(f"Dropped column: {column}")
+            
+        elif action == 'impute':
+            if method == 'mean':
+                value = df[column].mean()
+                df[column].fillna(value, inplace=True)
+                log.append(f"Imputed {column} with mean: {value:.2f}")
+            elif method == 'median':
+                value = df[column].median()
+                df[column].fillna(value, inplace=True)
+                log.append(f"Imputed {column} with median: {value:.2f}")
+            elif method == 'mode':
+                value = df[column].mode()[0] if not df[column].mode().empty else df[column].iloc[0]
+                df[column].fillna(value, inplace=True)
+                log.append(f"Imputed {column} with mode: {value}")
+                
+        elif action == 'scale':
+            if method == 'standard':
+                scaler = StandardScaler()
+                df[[column]] = scaler.fit_transform(df[[column]])
+                log.append(f"Applied StandardScaler to {column}")
+            elif method == 'minmax':
+                scaler = MinMaxScaler()
+                df[[column]] = scaler.fit_transform(df[[column]])
+                log.append(f"Applied MinMaxScaler to {column}")
+                
+        elif action == 'encode':
+            if method == 'label':
+                le = LabelEncoder()
+                df[column] = le.fit_transform(df[column].astype(str))
+                log.append(f"Applied LabelEncoder to {column}")
+            elif method == 'onehot':
+                dummies = pd.get_dummies(df[column], prefix=column)
+                df = pd.concat([df.drop(columns=[column]), dummies], axis=1)
+                log.append(f"Applied OneHotEncoder to {column}")
+    
+    return df
+
+
+def train_test_split_operation(df: pd.DataFrame, test_size: float, shuffle: bool, 
+                                random_state: int, output_dir: str) -> Tuple[Dict[str, Any], List[str]]:
+    """Split dataset into train and test sets"""
+    from sklearn.model_selection import train_test_split
+    
+    log = []
+    
+    # Validate test_size
+    if test_size < 0.1 or test_size > 0.4:
+        raise ValueError("test_size must be between 0.1 and 0.4")
+    
+    if len(df) < 10:
+        raise ValueError("Dataset too small for splitting (minimum 10 rows required)")
+    
+    # Perform split
+    train_df, test_df = train_test_split(
+        df, 
+        test_size=test_size, 
+        shuffle=shuffle, 
+        random_state=random_state
+    )
+    
+    # Save outputs
+    train_path = os.path.join(output_dir, 'train.csv')
+    test_path = os.path.join(output_dir, 'test.csv')
+    
+    train_df.to_csv(train_path, index=False)
+    test_df.to_csv(test_path, index=False)
+    
+    log.append(f"Split dataset: {len(train_df)} train rows, {len(test_df)} test rows")
+    log.append(f"Train/Test ratio: {(1-test_size)*100:.0f}%/{test_size*100:.0f}%")
+    
+    output_files = [
+        {
+            'name': 'train.csv',
+            'path': f'/uploads/{os.path.basename(output_dir)}/train.csv',
+            'rows': len(train_df),
+            'columns': len(train_df.columns)
+        },
+        {
+            'name': 'test.csv',
+            'path': f'/uploads/{os.path.basename(output_dir)}/test.csv',
+            'rows': len(test_df),
+            'columns': len(test_df.columns)
+        }
+    ]
+    
+    metadata = {
+        'split_type': 'train_test',
+        'test_size': test_size,
+        'rows_per_output': {
+            'train': len(train_df),
+            'test': len(test_df)
+        }
+    }
+    
+    return {'output_files': output_files, 'metadata': metadata}, log
+
+
+def cross_validation_split_operation(df: pd.DataFrame, n_folds: int, shuffle: bool, 
+                                     random_state: int, output_dir: str) -> Tuple[Dict[str, Any], List[str]]:
+    """Split dataset into K folds for cross-validation"""
+    from sklearn.model_selection import KFold
+    
+    log = []
+    
+    # Validate n_folds
+    if n_folds < 2 or n_folds > 10:
+        raise ValueError("n_folds must be between 2 and 10")
+    
+    if len(df) < n_folds * 2:
+        raise ValueError(f"Dataset too small for {n_folds}-fold CV (minimum {n_folds * 2} rows required)")
+    
+    # Perform K-Fold split
+    kf = KFold(n_splits=n_folds, shuffle=shuffle, random_state=random_state if shuffle else None)
+    
+    output_files = []
+    fold_num = 1
+    
+    for train_idx, val_idx in kf.split(df):
+        train_df = df.iloc[train_idx]
+        val_df = df.iloc[val_idx]
+        
+        train_path = os.path.join(output_dir, f'fold_{fold_num}_train.csv')
+        val_path = os.path.join(output_dir, f'fold_{fold_num}_val.csv')
+        
+        train_df.to_csv(train_path, index=False)
+        val_df.to_csv(val_path, index=False)
+        
+        output_files.extend([
+            {
+                'name': f'fold_{fold_num}_train.csv',
+                'path': f'/uploads/{os.path.basename(output_dir)}/fold_{fold_num}_train.csv',
+                'rows': len(train_df),
+                'columns': len(train_df.columns)
+            },
+            {
+                'name': f'fold_{fold_num}_val.csv',
+                'path': f'/uploads/{os.path.basename(output_dir)}/fold_{fold_num}_val.csv',
+                'rows': len(val_df),
+                'columns': len(val_df.columns)
+            }
+        ])
+        
+        log.append(f"Fold {fold_num}: {len(train_df)} train, {len(val_df)} validation rows")
+        fold_num += 1
+    
+    metadata = {
+        'split_type': 'kfold',
+        'n_folds': n_folds,
+        'rows_per_fold': {
+            f'fold_{i+1}': {
+                'train': output_files[i*2]['rows'],
+                'val': output_files[i*2+1]['rows']
+            } for i in range(n_folds)
+        }
+    }
+    
+    return {'output_files': output_files, 'metadata': metadata}, log
+
+
+def _load_dataframe(file_path: str) -> pd.DataFrame:
+    """Load dataframe from CSV or Excel file"""
+    if not os.path.exists(file_path):
+        raise FileNotFoundError(f"File not found: {file_path}")
+    
+    if file_path.endswith('.csv'):
+        return pd.read_csv(file_path)
+    elif file_path.endswith('.xlsx') or file_path.endswith('.xls'):
+        return pd.read_excel(file_path)
+    else:
+        raise ValueError("Unsupported file format. Use CSV or Excel.")
+
+
+@app.post("/run-pipeline")
+async def run_pipeline(req: PipelineRequest):
+    """
+    Advanced pipeline operations: clean, split, or combine operations
+    """
+    try:
+        # Load dataset
+        df = _load_dataframe(req.file_path)
+        if df is None or df.empty:
+            raise HTTPException(status_code=400, detail="Could not load or empty dataframe")
+        
+        original_rows = len(df)
+        transformation_log = []
+        
+        # Create output directory
+        timestamp = int(datetime.now().timestamp() * 1000)
+        output_dir_name = f"{timestamp}_{req.operation_type}"
+        output_dir = os.path.join(os.path.dirname(req.file_path), output_dir_name)
+        os.makedirs(output_dir, exist_ok=True)
+        
+        transformation_log.append(f"Starting pipeline: {req.operation_type}")
+        transformation_log.append(f"Original dataset: {original_rows} rows, {len(df.columns)} columns")
+        
+        # Execute operation based on type
+        if req.operation_type == 'clean_only':
+            # Apply cleaning pipeline
+            if req.cleaning_pipeline and req.cleaning_pipeline.get('steps'):
+                df = apply_cleaning_pipeline(df, req.cleaning_pipeline['steps'], transformation_log)
+            
+            cleaned_path = os.path.join(output_dir, 'cleaned.csv')
+            df.to_csv(cleaned_path, index=False)
+            
+            output_files = [{
+                'name': 'cleaned.csv',
+                'path': f'/uploads/{output_dir_name}/cleaned.csv',
+                'rows': len(df),
+                'columns': len(df.columns)
+            }]
+            
+            metadata = {
+                'rows_before': original_rows,
+                'rows_after_cleaning': len(df),
+                'operation': 'clean_only'
+            }
+            
+        elif req.operation_type == 'split':
+            # Split without cleaning
+            result, split_log = train_test_split_operation(
+                df, req.test_size, req.shuffle, req.random_state, output_dir
+            )
+            transformation_log.extend(split_log)
+            
+            output_files = result['output_files']
+            metadata = {
+                'rows_before': original_rows,
+                'operation': 'split',
+                **result['metadata']
+            }
+            
+        elif req.operation_type == 'clean_and_split':
+            # Clean then split
+            if req.cleaning_pipeline and req.cleaning_pipeline.get('steps'):
+                df = apply_cleaning_pipeline(df, req.cleaning_pipeline['steps'], transformation_log)
+            
+            rows_after_cleaning = len(df)
+            
+            result, split_log = train_test_split_operation(
+                df, req.test_size, req.shuffle, req.random_state, output_dir
+            )
+            transformation_log.extend(split_log)
+            
+            output_files = result['output_files']
+            metadata = {
+                'rows_before': original_rows,
+                'rows_after_cleaning': rows_after_cleaning,
+                'operation': 'clean_and_split',
+                **result['metadata']
+            }
+            
+        elif req.operation_type == 'cross_validation':
+            # Cross-validation without cleaning
+            result, cv_log = cross_validation_split_operation(
+                df, req.n_folds, req.shuffle, req.random_state, output_dir
+            )
+            transformation_log.extend(cv_log)
+            
+            output_files = result['output_files']
+            metadata = {
+                'rows_before': original_rows,
+                'operation': 'cross_validation',
+                **result['metadata']
+            }
+            
+        elif req.operation_type == 'clean_and_cv':
+            # Clean then cross-validation
+            if req.cleaning_pipeline and req.cleaning_pipeline.get('steps'):
+                df = apply_cleaning_pipeline(df, req.cleaning_pipeline['steps'], transformation_log)
+            
+            rows_after_cleaning = len(df)
+            
+            result, cv_log = cross_validation_split_operation(
+                df, req.n_folds, req.shuffle, req.random_state, output_dir
+            )
+            transformation_log.extend(cv_log)
+            
+            output_files = result['output_files']
+            metadata = {
+                'rows_before': original_rows,
+                'rows_after_cleaning': rows_after_cleaning,
+                'operation': 'clean_and_cv',
+                **result['metadata']
+            }
+        else:
+            raise HTTPException(status_code=400, detail=f"Invalid operation_type: {req.operation_type}")
+        
+        transformation_log.append(f"Pipeline completed successfully")
+        
+        # Generate Python code
+        python_code = _generate_pipeline_code(req, transformation_log)
+        
+        return {
+            'output_files': output_files,
+            'metadata': metadata,
+            'transformation_log': transformation_log,
+            'python_code': python_code,
+            'output_dir': output_dir
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+def _generate_pipeline_code(req: PipelineRequest, log: List[str]) -> str:
+    """Generate Python code for the pipeline"""
+    lines = [
+        "import pandas as pd",
+        "from sklearn.model_selection import train_test_split, KFold",
+        "from sklearn.preprocessing import StandardScaler, MinMaxScaler, LabelEncoder",
+        "from sklearn.impute import SimpleImputer",
+        "",
+        "# Load dataset",
+        f"df = pd.read_csv('{os.path.basename(req.file_path)}')",
+        f"print(f'Original dataset: {{len(df)}} rows, {{len(df.columns)}} columns')",
+        ""
+    ]
+    
+    # Add cleaning steps if applicable
+    if req.cleaning_pipeline and req.cleaning_pipeline.get('steps'):
+        lines.append("# Cleaning pipeline")
+        for step in req.cleaning_pipeline['steps']:
+            col = step.get('column')
+            action = step.get('action')
+            method = step.get('method')
+            
+            if action == 'impute' and method == 'mean':
+                lines.append(f"df['{col}'].fillna(df['{col}'].mean(), inplace=True)")
+            elif action == 'impute' and method == 'median':
+                lines.append(f"df['{col}'].fillna(df['{col}'].median(), inplace=True)")
+            elif action == 'impute' and method == 'mode':
+                lines.append(f"df['{col}'].fillna(df['{col}'].mode()[0], inplace=True)")
+            elif action == 'scale' and method == 'standard':
+                lines.append(f"scaler = StandardScaler()")
+                lines.append(f"df[['{col}']] = scaler.fit_transform(df[['{col}']])")
+            elif action == 'encode' and method == 'label':
+                lines.append(f"le = LabelEncoder()")
+                lines.append(f"df['{col}'] = le.fit_transform(df['{col}'].astype(str))")
+        lines.append("")
+    
+    # Add split logic
+    if 'split' in req.operation_type:
+        lines.extend([
+            "# Train/Test split",
+            f"train_df, test_df = train_test_split(df, test_size={req.test_size}, shuffle={req.shuffle}, random_state={req.random_state})",
+            "train_df.to_csv('train.csv', index=False)",
+            "test_df.to_csv('test.csv', index=False)",
+            "print(f'Train: {{len(train_df)}} rows | Test: {{len(test_df)}} rows')"
+        ])
+    elif 'cv' in req.operation_type:
+        lines.extend([
+            "# K-Fold Cross-Validation",
+            f"kf = KFold(n_splits={req.n_folds}, shuffle={req.shuffle}, random_state={req.random_state if req.shuffle else None})",
+            "fold_num = 1",
+            "for train_idx, val_idx in kf.split(df):",
+            "    train_df = df.iloc[train_idx]",
+            "    val_df = df.iloc[val_idx]",
+            "    train_df.to_csv(f'fold_{fold_num}_train.csv', index=False)",
+            "    val_df.to_csv(f'fold_{fold_num}_val.csv', index=False)",
+            "    print(f'Fold {fold_num}: {len(train_df)} train, {len(val_df)} val')",
+            "    fold_num += 1"
+        ])
+    elif req.operation_type == 'clean_only':
+        lines.append("df.to_csv('cleaned.csv', index=False)")
+    
+    return "\n".join(lines)
+
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)

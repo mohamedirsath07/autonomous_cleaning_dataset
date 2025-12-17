@@ -18,6 +18,15 @@ function App() {
   const [runs, setRuns] = useState([]);
   const [showHistory, setShowHistory] = useState(false);
   const [showPythonCode, setShowPythonCode] = useState(false);
+  
+  // Advanced Pipeline State
+  const [operationType, setOperationType] = useState('clean_only');
+  const [testSize, setTestSize] = useState(0.2);
+  const [nFolds, setNFolds] = useState(5);
+  const [shuffle, setShuffle] = useState(true);
+  const [randomState, setRandomState] = useState(42);
+  const [pipelineResult, setPipelineResult] = useState(null);
+  const [runningPipeline, setRunningPipeline] = useState(false);
 
   const handleFileChange = (e) => {
     setFile(e.target.files[0]);
@@ -130,6 +139,41 @@ function App() {
     }
   };
   
+  const handleRunPipeline = async () => {
+    if (!dataset) return;
+    
+    setRunningPipeline(true);
+    setError(null);
+    setPipelineResult(null);
+
+    const steps = Object.values(pipelineSteps);
+    const payload = {
+      operation_type: operationType,
+      test_size: testSize,
+      n_folds: nFolds,
+      shuffle: shuffle,
+      random_state: randomState,
+      cleaning_pipeline: { steps }
+    };
+
+    try {
+      const res = await axios.post(`http://localhost:5000/api/datasets/${dataset._id}/run-pipeline`, payload);
+      setPipelineResult(res.data);
+      fetchRuns(); // Refresh history
+      
+      // Scroll to results
+      setTimeout(() => {
+        document.getElementById('pipeline-results-section')?.scrollIntoView({ behavior: 'smooth' });
+      }, 100);
+      
+    } catch (err) {
+      console.error(err);
+      setError(err.response?.data?.message || "An error occurred during pipeline execution.");
+    } finally {
+      setRunningPipeline(false);
+    }
+  };
+  
   const fetchRuns = async () => {
     try {
       const res = await axios.get('http://localhost:5000/api/datasets/runs');
@@ -154,14 +198,14 @@ function App() {
     <div className="app-container">
       <header className="app-header">
         <div className="logo-area">
-          <span className="logo-icon">✨</span>
+          <span className="logo-icon">DF</span>
           <span className="app-title">DataForge</span>
         </div>
         <button 
           className="history-toggle" 
           onClick={() => setShowHistory(!showHistory)}
         >
-          📜 History ({runs.length})
+          History ({runs.length})
         </button>
       </header>
       
@@ -224,7 +268,7 @@ function App() {
                   onClick={handleUpload} 
                   disabled={uploading}
                 >
-                  {uploading ? 'Analyzing Dataset...' : 'Start Profiling 🚀'}
+                  {uploading ? 'Analyzing Dataset...' : 'Start Profiling'}
                 </button>
               </div>
             )}
@@ -259,7 +303,7 @@ function App() {
           marginBottom: '2rem',
           border: '1px solid #ef4444'
         }}>
-          🚨 {error}
+          Error: {error}
         </div>
       )}
 
@@ -283,7 +327,7 @@ function App() {
                 
                 {col.issues && col.issues.length > 0 && (
                   <div className="issue-tag">
-                    ⚠️ {col.issues[0]} {col.issues.length > 1 && `+${col.issues.length - 1} more`}
+                    {col.issues[0]} {col.issues.length > 1 && `+${col.issues.length - 1} more`}
                   </div>
                 )}
                 
@@ -318,20 +362,20 @@ function App() {
                   value={pipelineSteps[col.name] ? `${pipelineSteps[col.name].action}:${pipelineSteps[col.name].method || ''}` : ""}
                 >
                   <option value="">No Action</option>
-                  <option value="drop:">🗑️ Drop Column</option>
+                  <option value="drop:">Drop Column</option>
                   {col.inferred_type === 'numeric' && (
                     <>
-                      <option value="impute:mean">📊 Impute Mean</option>
-                      <option value="impute:median">📊 Impute Median</option>
-                      <option value="scale:standard">📏 Standard Scale</option>
-                      <option value="scale:minmax">📏 MinMax Scale</option>
+                      <option value="impute:mean">Impute Mean</option>
+                      <option value="impute:median">Impute Median</option>
+                      <option value="scale:standard">Standard Scale</option>
+                      <option value="scale:minmax">MinMax Scale</option>
                     </>
                   )}
                   {(col.inferred_type === 'text' || col.inferred_type === 'object') && (
                     <>
-                      <option value="impute:mode">📊 Impute Mode</option>
-                      <option value="encode:onehot">🔠 One-Hot Encode</option>
-                      <option value="encode:label">🏷️ Label Encode</option>
+                      <option value="impute:mode">Impute Mode</option>
+                      <option value="encode:onehot">One-Hot Encode</option>
+                      <option value="encode:label">Label Encode</option>
                     </>
                   )}
                 </select>
@@ -341,15 +385,263 @@ function App() {
 
           <div className="action-bar fade-in">
             <button className="run-btn" onClick={handleClean} disabled={cleaning}>
-              {cleaning ? 'Running Pipeline...' : ' Run Cleaning Pipeline'}
+              {cleaning ? 'Running Pipeline...' : 'Run Cleaning Pipeline'}
             </button>
           </div>
+          
+          {/* Advanced Pipeline Operations Section */}
+          <div className="pipeline-operations-section fade-in" style={{marginTop: '3rem'}}>
+            <div className="section-header">
+              <h2 className="section-title">Advanced Dataset Operations</h2>
+              <p style={{color: 'var(--text-secondary)', marginTop: '0.5rem'}}>
+                Choose how to process your dataset: clean only, split, or combine operations
+              </p>
+            </div>
+            
+            <div className="operation-selector" style={{marginBottom: '2rem'}}>
+              <div className="radio-group">
+                <label className={`radio-option ${operationType === 'clean_only' ? 'selected' : ''}`}>
+                  <input
+                    type="radio"
+                    name="operation"
+                    value="clean_only"
+                    checked={operationType === 'clean_only'}
+                    onChange={(e) => setOperationType(e.target.value)}
+                  />
+                  <div>
+                    <strong>Clean Dataset Only</strong>
+                    <p>Apply cleaning pipeline without splitting</p>
+                  </div>
+                </label>
+                
+                <label className={`radio-option ${operationType === 'split' ? 'selected' : ''}`}>
+                  <input
+                    type="radio"
+                    name="operation"
+                    value="split"
+                    checked={operationType === 'split'}
+                    onChange={(e) => setOperationType(e.target.value)}
+                  />
+                  <div>
+                    <strong>Split Dataset (Train/Test)</strong>
+                    <p>Split raw dataset into training and test sets</p>
+                  </div>
+                </label>
+                
+                <label className={`radio-option ${operationType === 'clean_and_split' ? 'selected' : ''}`}>
+                  <input
+                    type="radio"
+                    name="operation"
+                    value="clean_and_split"
+                    checked={operationType === 'clean_and_split'}
+                    onChange={(e) => setOperationType(e.target.value)}
+                  />
+                  <div>
+                    <strong>Clean + Train/Test Split</strong>
+                    <p>Clean dataset first, then split into train/test</p>
+                  </div>
+                </label>
+                
+                <label className={`radio-option ${operationType === 'cross_validation' ? 'selected' : ''}`}>
+                  <input
+                    type="radio"
+                    name="operation"
+                    value="cross_validation"
+                    checked={operationType === 'cross_validation'}
+                    onChange={(e) => setOperationType(e.target.value)}
+                  />
+                  <div>
+                    <strong>Cross-Validation Split</strong>
+                    <p>Split dataset into K folds for cross-validation</p>
+                  </div>
+                </label>
+                
+                <label className={`radio-option ${operationType === 'clean_and_cv' ? 'selected' : ''}`}>
+                  <input
+                    type="radio"
+                    name="operation"
+                    value="clean_and_cv"
+                    checked={operationType === 'clean_and_cv'}
+                    onChange={(e) => setOperationType(e.target.value)}
+                  />
+                  <div>
+                    <strong>Clean + Cross-Validation</strong>
+                    <p>Clean dataset first, then perform K-fold split</p>
+                  </div>
+                </label>
+              </div>
+            </div>
+            
+            {/* Conditional Inputs */}
+            <div className="pipeline-config">
+              {(operationType === 'split' || operationType === 'clean_and_split') && (
+                <div className="config-group fade-in">
+                  <h3>Train/Test Split Configuration</h3>
+                  <div className="input-row">
+                    <div className="input-group">
+                      <label>Test Size: {(testSize * 100).toFixed(0)}%</label>
+                      <input
+                        type="range"
+                        min="0.1"
+                        max="0.4"
+                        step="0.05"
+                        value={testSize}
+                        onChange={(e) => setTestSize(parseFloat(e.target.value))}
+                      />
+                      <small>Train: {((1 - testSize) * 100).toFixed(0)}% | Test: {(testSize * 100).toFixed(0)}%</small>
+                    </div>
+                  </div>
+                </div>
+              )}
+              
+              {(operationType === 'cross_validation' || operationType === 'clean_and_cv') && (
+                <div className="config-group fade-in">
+                  <h3>Cross-Validation Configuration</h3>
+                  <div className="input-row">
+                    <div className="input-group">
+                      <label>Number of Folds (K)</label>
+                      <input
+                        type="number"
+                        min="2"
+                        max="10"
+                        value={nFolds}
+                        onChange={(e) => setNFolds(parseInt(e.target.value))}
+                      />
+                    </div>
+                    <div className="input-group">
+                      <label>
+                        <input
+                          type="checkbox"
+                          checked={shuffle}
+                          onChange={(e) => setShuffle(e.target.checked)}
+                        />
+                        Shuffle data before splitting
+                      </label>
+                    </div>
+                  </div>
+                </div>
+              )}
+              
+              <div className="config-group">
+                <div className="input-row">
+                  <div className="input-group">
+                    <label>Random Seed (optional)</label>
+                    <input
+                      type="number"
+                      value={randomState}
+                      onChange={(e) => setRandomState(parseInt(e.target.value))}
+                      placeholder="42"
+                    />
+                    <small>Set seed for reproducible results</small>
+                  </div>
+                </div>
+              </div>
+            </div>
+            
+            <div className="action-bar fade-in" style={{marginTop: '2rem'}}>
+              <button 
+                className="run-btn" 
+                onClick={handleRunPipeline} 
+                disabled={runningPipeline}
+                style={{width: '100%', padding: '1.2rem'}}
+              >
+                {runningPipeline ? 'Running Pipeline...' : 'Run Data Pipeline'}
+              </button>
+            </div>
+          </div>
+          
+          {/* Pipeline Results Section */}
+          {pipelineResult && (
+            <div id="pipeline-results-section" className="results-container fade-in" style={{marginTop: '3rem'}}>
+              <div className="results-header">
+                <div>
+                  <h2 style={{margin: 0}}>Pipeline Complete</h2>
+                  <p style={{color: '#666'}}>Operation: {operationType.replace(/_/g, ' ').toUpperCase()}</p>
+                </div>
+              </div>
+              
+              {/* Output Files */}
+              <div className="output-files" style={{marginTop: '2rem'}}>
+                <h3>Download Output Files</h3>
+                <div className="file-grid">
+                  {pipelineResult.output_files && pipelineResult.output_files.map((file, idx) => (
+                    <div key={idx} className="file-card">
+                      <div className="file-icon">📄</div>
+                      <div className="file-info">
+                        <strong>{file.name}</strong>
+                        <p>{file.rows} rows × {file.columns} columns</p>
+                      </div>
+                      <a 
+                        href={`http://localhost:5000${file.path}`} 
+                        download
+                        className="btn-secondary"
+                        style={{fontSize: '0.9rem'}}
+                      >
+                        Download
+                      </a>
+                    </div>
+                  ))}
+                </div>
+              </div>
+              
+              {/* Metadata Summary */}
+              {pipelineResult.metadata && (
+                <div style={{marginTop: '2rem'}}>
+                  <h3>Pipeline Summary</h3>
+                  <div className="metadata-grid">
+                    <div className="metadata-item">
+                      <span>Rows Before</span>
+                      <strong>{pipelineResult.metadata.rows_before}</strong>
+                    </div>
+                    {pipelineResult.metadata.rows_after_cleaning && (
+                      <div className="metadata-item">
+                        <span>Rows After Cleaning</span>
+                        <strong>{pipelineResult.metadata.rows_after_cleaning}</strong>
+                      </div>
+                    )}
+                    {pipelineResult.metadata.split_type && (
+                      <div className="metadata-item">
+                        <span>Split Type</span>
+                        <strong>{pipelineResult.metadata.split_type}</strong>
+                      </div>
+                    )}
+                    {pipelineResult.metadata.test_size && (
+                      <div className="metadata-item">
+                        <span>Test Size</span>
+                        <strong>{(pipelineResult.metadata.test_size * 100).toFixed(0)}%</strong>
+                      </div>
+                    )}
+                    {pipelineResult.metadata.n_folds && (
+                      <div className="metadata-item">
+                        <span>Number of Folds</span>
+                        <strong>{pipelineResult.metadata.n_folds}</strong>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+              
+              {/* Transformation Log */}
+              {pipelineResult.transformation_log && pipelineResult.transformation_log.length > 0 && (
+                <div style={{marginTop: '2rem'}}>
+                  <h3>Transformation Log</h3>
+                  <div className="log-list">
+                    {pipelineResult.transformation_log.map((log, i) => (
+                      <div key={i} className="log-item">
+                        <span style={{color: '#10b981'}}>✓</span> {log}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
 
           {cleanResult && (
             <div id="results-section" className="results-container">
               <div className="results-header">
                 <div>
-                  <h2 style={{margin: 0}}>🎉 Cleaning Complete!</h2>
+                  <h2 style={{margin: 0}}>Cleaning Complete</h2>
                   <p style={{color: '#666'}}>Your data has been transformed successfully.</p>
                 </div>
                 <div className="btn-group">
@@ -357,7 +649,7 @@ function App() {
                     className="btn-primary"
                     onClick={() => downloadFile(cleanResult.run_id)}
                   >
-                    📥 Download Cleaned Data
+                    Download Cleaned Data
                   </button>
                   <button 
                     className="btn-secondary"
@@ -373,7 +665,7 @@ function App() {
                   <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem'}}>
                     <h3>Generated Python Pipeline</h3>
                     <button className="btn-secondary" style={{fontSize: '0.8rem'}} onClick={copyPythonCode}>
-                      📋 Copy
+                      Copy Code
                     </button>
                   </div>
                   <pre className="code-block">

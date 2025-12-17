@@ -173,4 +173,87 @@ router.get('/runs/:id/download', async (req, res) => {
     }
 });
 
+// POST /api/datasets/:id/run-pipeline - Run advanced pipeline operations
+router.post('/:id/run-pipeline', async (req, res) => {
+    console.log(`Run pipeline request for ID: ${req.params.id}`);
+    try {
+        const dataset = await Dataset.findById(req.params.id);
+        if (!dataset) {
+            return res.status(404).json({ message: 'Dataset not found' });
+        }
+
+        const { 
+            operation_type, 
+            test_size, 
+            n_folds, 
+            shuffle, 
+            random_state, 
+            cleaning_pipeline 
+        } = req.body;
+
+        // Validation
+        const validOperations = ['clean_only', 'split', 'clean_and_split', 'cross_validation', 'clean_and_cv'];
+        if (!operation_type || !validOperations.includes(operation_type)) {
+            return res.status(400).json({ message: 'Invalid operation_type' });
+        }
+
+        if ((operation_type === 'split' || operation_type === 'clean_and_split') && 
+            (test_size < 0.1 || test_size > 0.4)) {
+            return res.status(400).json({ message: 'test_size must be between 0.1 and 0.4' });
+        }
+
+        if ((operation_type === 'cross_validation' || operation_type === 'clean_and_cv') && 
+            (n_folds < 2 || n_folds > 10)) {
+            return res.status(400).json({ message: 'n_folds must be between 2 and 10' });
+        }
+
+        const pythonServiceUrl = process.env.PYTHON_SERVICE_URL || 'http://localhost:8000';
+        const absolutePath = path.resolve(dataset.file_path);
+        
+        console.log("Sending run-pipeline request to Python service");
+
+        const response = await axios.post(`${pythonServiceUrl}/run-pipeline`, {
+            file_path: absolutePath,
+            operation_type,
+            test_size: test_size || 0.2,
+            n_folds: n_folds || 5,
+            shuffle: shuffle !== undefined ? shuffle : true,
+            random_state: random_state || 42,
+            cleaning_pipeline: cleaning_pipeline || { steps: [] }
+        });
+
+        console.log("Received response from Python service (run-pipeline)");
+        
+        // Save pipeline run to database
+        const newRun = new PipelineRun({
+            dataset_id: dataset._id,
+            pipeline_config: { 
+                operation_type,
+                test_size,
+                n_folds,
+                shuffle,
+                random_state,
+                steps: cleaning_pipeline?.steps || []
+            },
+            cleaned_file_path: response.data.output_files?.[0]?.path || '',
+            output_files: response.data.output_files || [],
+            metadata: response.data.metadata || {},
+            transformation_log: response.data.transformation_log || [],
+            python_code: response.data.python_code || ''
+        });
+        const savedRun = await newRun.save();
+        
+        res.json({
+            ...response.data,
+            run_id: savedRun._id
+        });
+    } catch (error) {
+        console.error("Error in run-pipeline route:", error.message);
+        if (error.response) {
+            console.error("Python service error data:", error.response.data);
+        }
+        res.status(500).json({ message: error.response?.data?.detail || 'Error running pipeline' });
+    }
+});
+
 module.exports = router;
