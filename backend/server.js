@@ -3,9 +3,11 @@ const mongoose = require('mongoose');
 const cors = require('cors');
 const dotenv = require('dotenv');
 const path = require('path');
-const datasetRoutes = require('./routes/datasetRoutes');
 
-dotenv.config();
+// Load .env from the backend directory
+dotenv.config({ path: path.join(__dirname, '.env') });
+
+const datasetRoutes = require('./routes/datasetRoutes');
 
 const app = express();
 const PORT = process.env.PORT || 5000;

@@ -1,721 +1,549 @@
-import { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
-import './App.css';
+import { 
+  Upload, 
+  Settings, 
+  Database, 
+  Zap, 
+  LayoutTemplate, 
+  GitBranch, 
+  Terminal as TerminalIcon, 
+  CheckCircle,
+  Download,
+  BarChart,
+  BrainCircuit,
+  Layers,
+  FileCheck,
+  Activity
+} from 'lucide-react';
 
-function App() {
+const AutoKlean = () => {
+  const [scrollY, setScrollY] = useState(0);
+  const [activeTab, setActiveTab] = useState('config');
+  
+  // Data States
   const [file, setFile] = useState(null);
-  const [uploading, setUploading] = useState(false);
   const [dataset, setDataset] = useState(null);
   const [profile, setProfile] = useState(null);
-  const [error, setError] = useState(null);
-  
-  // Pipeline State
-  const [pipelineSteps, setPipelineSteps] = useState({});
-  const [cleaning, setCleaning] = useState(false);
-  const [cleanResult, setCleanResult] = useState(null);
-  
-  // History State
-  const [runs, setRuns] = useState([]);
-  const [showHistory, setShowHistory] = useState(false);
-  const [showPythonCode, setShowPythonCode] = useState(false);
-  
-  // Advanced Pipeline State
-  const [operationType, setOperationType] = useState('clean_only');
-  const [testSize, setTestSize] = useState(0.2);
-  const [nFolds, setNFolds] = useState(5);
-  const [shuffle, setShuffle] = useState(true);
-  const [randomState, setRandomState] = useState(42);
-  const [pipelineResult, setPipelineResult] = useState(null);
-  const [runningPipeline, setRunningPipeline] = useState(false);
+  const [cleanedFileUrl, setCleanedFileUrl] = useState(null);
 
-  const handleFileChange = (e) => {
-    setFile(e.target.files[0]);
-    setError(null);
-    setProfile(null);
-    setCleanResult(null);
-    setPipelineSteps({});
-  };
+  // Configuration States
+  const [splitRatio, setSplitRatio] = useState(0);
+  const [epochs, setEpochs] = useState(0);
+  const [kFolds, setKFolds] = useState(0);
+  const [removeOutliers, setRemoveOutliers] = useState(false);
+  const [imputeMissing, setImputeMissing] = useState(false);
+  const [normalizeFeatures, setNormalizeFeatures] = useState(false);
+  const [generateSplitData, setGenerateSplitData] = useState(false);
 
-  const handleUpload = async () => {
-    if (!file) {
-      setError("Please select a file first.");
-      return;
-    }
+  // Split Data ZIP URL
+  const [splitZipUrl, setSplitZipUrl] = useState(null);
 
-    setUploading(true);
-    setError(null);
+  // Processing States
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [logs, setLogs] = useState([]);
+  const [pipelineResults, setPipelineResults] = useState(null);
 
-    const formData = new FormData();
-    formData.append('file', file);
-
-    try {
-      // Upload file
-      const uploadRes = await axios.post('http://localhost:5000/api/datasets', formData, {
-        headers: {
-          'Content-Type': 'multipart/form-data',
-        },
-      });
-
-      const newDataset = uploadRes.data;
-      setDataset(newDataset);
-      
-      // Fetch profile
-      const profileRes = await axios.get(`http://localhost:5000/api/datasets/${newDataset._id}/profile`);
-      setProfile(profileRes.data);
-      
-      // Auto-apply suggested fixes
-      autoApplySuggestions(profileRes.data.columns);
-
-    } catch (err) {
-      console.error(err);
-      setError(err.response?.data?.message || "An error occurred during upload/profiling.");
-    } finally {
-      setUploading(false);
-    }
-  };
-  
-  const autoApplySuggestions = (columns) => {
-    const suggestedSteps = {};
-    columns.forEach(col => {
-      if (col.suggested && col.suggested.length > 0) {
-        const firstSuggestion = col.suggested[0];
-        if (firstSuggestion === "impute_median") {
-          suggestedSteps[col.name] = { column: col.name, action: "impute", method: "median" };
-        } else if (firstSuggestion === "impute_mode") {
-          suggestedSteps[col.name] = { column: col.name, action: "impute", method: "mode" };
-        } else if (firstSuggestion === "robust_scale") {
-          suggestedSteps[col.name] = { column: col.name, action: "scale", method: "standard" };
-        }
-      }
-    });
-    setPipelineSteps(suggestedSteps);
-  };
-  
+  // Handle Scroll
   useEffect(() => {
-    fetchRuns();
+    const handleScroll = () => setScrollY(window.scrollY);
+    window.addEventListener('scroll', handleScroll, { passive: true });
+    return () => window.removeEventListener('scroll', handleScroll);
   }, []);
 
-  const handleActionChange = (colName, value) => {
-    if (!value) {
-      const newSteps = { ...pipelineSteps };
-      delete newSteps[colName];
-      setPipelineSteps(newSteps);
-      return;
-    }
+  // Handle File Upload
+  const handleFileChange = async (e) => {
+    const selectedFile = e.target.files?.[0];
+    if (!selectedFile) return;
 
-    // Parse value like "impute:mean"
-    const [action, method] = value.split(':');
-    setPipelineSteps({
-      ...pipelineSteps,
-      [colName]: { column: colName, action, method }
-    });
-  };
+    setFile(selectedFile);
+    setDataset(null);
+    setProfile(null);
+    setCleanedFileUrl(null);
+    setSplitZipUrl(null);
+    setPipelineResults(null);
+    setLogs(["Uploading and profiling dataset..."]);
+    setIsProcessing(true);
 
-  const handleClean = async () => {
-    if (!dataset) return;
-    
-    setCleaning(true);
-    setError(null);
-
-    const steps = Object.values(pipelineSteps);
+    const formData = new FormData();
+    formData.append('file', selectedFile);
 
     try {
-      const res = await axios.post(`http://localhost:5000/api/datasets/${dataset._id}/prepare`, {
-        steps
+      const response = await axios.post('http://127.0.0.1:5000/api/datasets/upload', formData, {
+        headers: { 'Content-Type': 'multipart/form-data' }
       });
-      setCleanResult(res.data);
-      fetchRuns(); // Refresh history
       
-      // Scroll to results
-      setTimeout(() => {
-        document.getElementById('results-section')?.scrollIntoView({ behavior: 'smooth' });
-      }, 100);
-      
-    } catch (err) {
-      console.error(err);
-      setError(err.response?.data?.message || "An error occurred during cleaning.");
+      setDataset(response.data);
+      setProfile(response.data.profile);
+      setLogs(prev => [...prev, "Upload complete.", "Profile generated successfully."]);
+    } catch (error) {
+      console.error("Upload error:", error);
+      setLogs(prev => [...prev, "Error uploading file. Please try again."]);
     } finally {
-      setCleaning(false);
+      setIsProcessing(false);
     }
   };
-  
-  const handleRunPipeline = async () => {
+
+  // Run Pipeline
+  const startProcessing = async () => {
     if (!dataset) return;
-    
-    setRunningPipeline(true);
-    setError(null);
-    setPipelineResult(null);
 
-    const steps = Object.values(pipelineSteps);
-    const payload = {
-      operation_type: operationType,
-      test_size: testSize,
-      n_folds: nFolds,
-      shuffle: shuffle,
-      random_state: randomState,
-      cleaning_pipeline: { steps }
-    };
+    setIsProcessing(true);
+    setLogs(prev => [...prev, "Initializing pipeline...", "Sending configuration to ML service..."]);
+    setCleanedFileUrl(null);
+    setSplitZipUrl(null);
+    setPipelineResults(null);
 
     try {
-      const res = await axios.post(`http://localhost:5000/api/datasets/${dataset._id}/run-pipeline`, payload);
-      setPipelineResult(res.data);
-      fetchRuns(); // Refresh history
-      
-      // Scroll to results
-      setTimeout(() => {
-        document.getElementById('pipeline-results-section')?.scrollIntoView({ behavior: 'smooth' });
-      }, 100);
-      
-    } catch (err) {
-      console.error(err);
-      setError(err.response?.data?.message || "An error occurred during pipeline execution.");
+      const response = await axios.post(`http://127.0.0.1:5000/api/datasets/${dataset._id}/clean`, {
+        splitRatio: generateSplitData ? splitRatio : 0,
+        kFolds,
+        epochs,
+        removeOutliers,
+        imputeMissing,
+        normalizeFeatures
+      });
+
+      // Store full pipeline results
+      setPipelineResults(response.data);
+      console.log("Pipeline response:", response.data);
+
+      // Update logs with the transformation log from backend
+      if (response.data.transformation_log) {
+        setLogs(prev => [...prev, ...response.data.transformation_log, "Pipeline completed successfully."]);
+      } else {
+        setLogs(prev => [...prev, "Pipeline completed."]);
+      }
+
+      if (response.data.cleanedFilePath) {
+        setCleanedFileUrl(`http://127.0.0.1:5000${response.data.cleanedFilePath}`);
+      }
+
+      // Set train/test ZIP URL if available
+      if (response.data.splitZipPath) {
+        console.log("Setting splitZipUrl:", `http://127.0.0.1:5000${response.data.splitZipPath}`);
+        setSplitZipUrl(`http://127.0.0.1:5000${response.data.splitZipPath}`);
+      } else {
+        console.log("No splitZipPath in response");
+      }
+
+    } catch (error) {
+      console.error("Pipeline error:", error);
+      setLogs(prev => [...prev, "Error executing pipeline.", error.message]);
     } finally {
-      setRunningPipeline(false);
+      setIsProcessing(false);
     }
   };
-  
-  const fetchRuns = async () => {
-    try {
-      const res = await axios.get('http://localhost:5000/api/datasets/runs');
-      setRuns(res.data);
-    } catch (err) {
-      console.error("Error fetching runs:", err);
-    }
-  };
-  
-  const downloadFile = (runId) => {
-    window.open(`http://localhost:5000/api/datasets/runs/${runId}/download`, '_blank');
-  };
-  
-  const copyPythonCode = () => {
-    if (cleanResult?.python_code) {
-      navigator.clipboard.writeText(cleanResult.python_code);
-      alert("Python code copied to clipboard!");
-    }
+
+  // --- Components ---
+
+  const Reveal = ({ children }) => {
+    // No animation - content is always visible immediately
+    return <>{children}</>;
   };
 
   return (
-    <div className="app-container">
-      <header className="app-header">
-        <div className="logo-area">
-          <span className="logo-icon">DF</span>
-          <span className="app-title">DataForge</span>
-        </div>
-        <button 
-          className="history-toggle" 
-          onClick={() => setShowHistory(!showHistory)}
-        >
-          History ({runs.length})
-        </button>
-      </header>
+    <div className="bg-[#030303] text-white min-h-screen font-sans selection:bg-[#ccff00] selection:text-black overflow-x-hidden">
       
-      <div className={`history-sidebar ${showHistory ? 'open' : ''}`}>
-        <button className="close-btn" onClick={() => setShowHistory(false)}>&times;</button>
-        <h2>Pipeline History</h2>
-        <div className="history-list">
-          {runs.map(run => (
-            <div key={run._id} className="history-item">
-              <div>
-                <strong>{run.dataset_id?.name || 'Unknown Dataset'}</strong>
-                <p style={{fontSize: '0.8rem', color: 'var(--text-secondary)'}}>{new Date(run.created_at).toLocaleString()}</p>
-                <p className="small-text">{run.transformation_log.length} transformations</p>
-              </div>
-              <button 
-                onClick={() => downloadFile(run._id)} 
-                className="btn-secondary"
-                style={{marginTop: '0.5rem', width: '100%', fontSize: '0.8rem'}}
-              >
-                Download Result
-              </button>
-            </div>
-          ))}
-          {runs.length === 0 && <p style={{color: 'var(--text-secondary)', textAlign: 'center'}}>No runs yet.</p>}
+      {/* Navbar */}
+      <nav className={`fixed top-0 w-full z-50 px-6 py-4 transition-all duration-300 ${scrollY > 20 ? 'bg-[#030303]/90 backdrop-blur-md border-b border-white/5' : ''}`}>
+        <div className="w-full max-w-[1600px] mx-auto flex justify-between items-center">
+          <div className="flex items-center gap-2 font-bold text-xl tracking-tighter cursor-pointer" onClick={() => window.scrollTo({top: 0, behavior: 'smooth'})}>
+            <div className="w-4 h-4 bg-[#ccff00] rounded-sm transform rotate-45" />
+            AUTOKLEAN
+          </div>
+          <div className="flex items-center gap-6">
+            <button className="text-sm font-medium text-gray-400 hover:text-white transition-colors">Docs</button>
+            <button className="px-6 py-2.5 text-sm font-bold bg-white text-black rounded-full hover:bg-[#ccff00] transition-colors">Sign In</button>
+          </div>
         </div>
-      </div>
-      
-      {!profile && !cleanResult && (
-        <div className="hero-section fade-in">
-          <h1 className="hero-title">Autonomous Data Cleaning</h1>
-          <p className="hero-subtitle">
-            Upload your messy dataset and let our AI-powered engine profile, clean, and generate production-ready Python pipelines for you.
-          </p>
-        </div>
-      )}
+      </nav>
 
-      <div className="upload-section fade-in">
-        {!profile ? (
-          <div className="upload-card">
-            <div className="file-input-wrapper">
-              <input 
-                type="file" 
-                className="file-input" 
-                onChange={handleFileChange} 
-                accept=".csv,.xlsx,.xls" 
-              />
-              <div style={{pointerEvents: 'none'}}>
-                <div style={{fontSize: '3rem', marginBottom: '1rem'}}>📂</div>
-                <h3 style={{marginBottom: '0.5rem', color: 'var(--text-main)'}}>
-                  {file ? file.name : "Drag & Drop or Click to Upload"}
-                </h3>
-                <p style={{color: 'var(--text-secondary)'}}>Supports CSV and Excel files</p>
+      {/* Hero Section */}
+      <section className="relative pt-32 pb-20 px-6 flex flex-col items-center justify-center min-h-[90vh]">
+        <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,_var(--tw-gradient-stops))] from-white/5 via-transparent to-transparent opacity-50 blur-3xl pointer-events-none" />
+        
+        <div className="text-center max-w-6xl mx-auto space-y-8">
+          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full border border-[#ccff00]/20 bg-[#ccff00]/5 text-[#ccff00] text-xs font-mono uppercase tracking-widest mb-4">
+            <Zap size={12} /> V2.0 Auto-Pipeline Engine
+          </div>
+          
+          <h1 className="text-6xl md:text-8xl lg:text-9xl font-bold tracking-tighter leading-[0.95]">
+            Refine Data. <br />
+            <span className="text-transparent bg-clip-text bg-gradient-to-b from-white to-gray-500">Amplify Models.</span>
+          </h1>
+          
+          <p className="text-xl text-gray-400 max-w-2xl mx-auto leading-relaxed">
+            Upload raw datasets and let AutoKlean handle missing values, normalization, splits, and feature engineering instantly.
+          </p>
+
+          {/* Upload Area */}
+          <div className="mt-12 w-full max-w-2xl mx-auto group cursor-pointer relative">
+            <input
+              type="file"
+              accept=".csv,.json"
+              onChange={handleFileChange}
+              className="hidden"
+              id="file-upload"
+            />
+            <label htmlFor="file-upload" className="cursor-pointer block w-full h-full">
+              <div className="absolute inset-0 bg-[#ccff00] opacity-0 group-hover:opacity-5 blur-2xl transition-opacity duration-500 rounded-2xl" />
+              <div className="relative border-2 border-dashed border-white/10 bg-[#0a0a0a] rounded-2xl p-12 flex flex-col items-center justify-center gap-4 transition-all duration-300 group-hover:border-[#ccff00]/50 group-hover:scale-[1.01]">
+                <div className="w-16 h-16 bg-[#1a1a1a] rounded-full flex items-center justify-center text-gray-400 group-hover:text-[#ccff00] transition-colors">
+                  <Upload size={32} />
+                </div>
+                <div className="text-center">
+                  <p className="text-lg font-bold text-white">
+                    {file ? file.name : 'Drop your .CSV or .JSON here'}
+                  </p>
+                  <p className="text-sm text-gray-500">Supports Pandas, NumPy, and SQL exports</p>
+                </div>
               </div>
-            </div>
+            </label>
+          </div>
+        </div>
+      </section>
+
+      {/* Main Interface / Workspace */}
+      <section className="py-20 px-4 md:px-8 max-w-[1600px] mx-auto">
+        <Reveal>
+          <div className="flex flex-col md:flex-row gap-8">
             
-            {file && (
-              <div style={{marginTop: '2rem'}}>
+            {/* Left: Configuration Panel */}
+            <div className="w-full md:w-1/3 space-y-6">
+              <div className="bg-[#0a0a0a] border border-white/10 rounded-xl p-6 shadow-2xl sticky top-24">
+                <div className="flex items-center gap-3 mb-6 border-b border-white/5 pb-4">
+                  <Settings className="text-[#ccff00]" size={20} />
+                  <h3 className="font-bold text-lg">Pipeline Config</h3>
+                </div>
+
+                {/* Train/Test Split */}
+                <div className="space-y-4 mb-8">
+                  <div className="flex justify-between items-center text-sm">
+                    <span className="text-gray-400">Train / Test Split</span>
+                    <div className="flex items-center gap-2">
+                      <input 
+                        type="number" 
+                        min="0" 
+                        max="100" 
+                        value={splitRatio}
+                        onChange={(e) => setSplitRatio(Math.max(0, Math.min(100, parseInt(e.target.value) || 0)))}
+                        className="bg-white/5 border border-white/10 rounded px-2 py-1 w-16 text-center font-mono text-sm focus:outline-none focus:border-[#ccff00]"
+                      />
+                      <span className="text-[#ccff00] font-mono text-xs">% train</span>
+                    </div>
+                  </div>
+                  <div className="relative h-2 bg-gray-800 rounded-full overflow-hidden">
+                    <div 
+                      className="absolute left-0 top-0 h-full bg-[#ccff00] transition-all" 
+                      style={{ width: `${splitRatio}%` }}
+                    />
+                    <input 
+                      type="range" 
+                      min="0" 
+                      max="100" 
+                      value={splitRatio} 
+                      onChange={(e) => setSplitRatio(parseInt(e.target.value))}
+                      className="absolute inset-0 w-full opacity-0 cursor-pointer"
+                    />
+                  </div>
+                  <div className="flex justify-between text-xs text-gray-500">
+                    <span>Train: {splitRatio}%</span>
+                    <span>Test: {100 - splitRatio}%</span>
+                  </div>
+                </div>
+
+                {/* K-Folds Input */}
+                <div className="space-y-4 mb-8">
+                  <div className="flex justify-between items-center text-sm">
+                    <span className="text-gray-400">Cross Validation (K-Folds)</span>
+                    <div className="flex items-center gap-2">
+                       <button onClick={() => setKFolds(Math.max(0, kFolds-1))} className="w-6 h-6 rounded bg-white/5 hover:bg-white/10 flex items-center justify-center">-</button>
+                       <input 
+                         type="number" 
+                         min="0" 
+                         max="20" 
+                         value={kFolds}
+                         onChange={(e) => setKFolds(Math.max(0, Math.min(20, parseInt(e.target.value) || 0)))}
+                         className="bg-white/5 border border-white/10 rounded px-2 py-1 w-12 text-center font-mono text-sm focus:outline-none focus:border-[#ccff00]"
+                       />
+                       <button onClick={() => setKFolds(Math.min(20, kFolds+1))} className="w-6 h-6 rounded bg-white/5 hover:bg-white/10 flex items-center justify-center">+</button>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Epochs Input */}
+                <div className="space-y-4 mb-8">
+                  <div className="flex justify-between items-center text-sm">
+                    <span className="text-gray-400">Target Epochs</span>
+                    <input 
+                      type="number" 
+                      value={epochs}
+                      onChange={(e) => setEpochs(e.target.value)}
+                      className="bg-white/5 border border-white/10 rounded px-2 py-1 w-20 text-right font-mono text-sm focus:outline-none focus:border-[#ccff00]"
+                    />
+                  </div>
+                </div>
+
+                {/* Toggles */}
+                <div className="space-y-3 mb-8">
+                  {[
+                    { label: 'Remove Outliers', state: removeOutliers, setState: setRemoveOutliers },
+                    { label: 'Impute Missing (KNN)', state: imputeMissing, setState: setImputeMissing },
+                    { label: 'Normalize Features', state: normalizeFeatures, setState: setNormalizeFeatures },
+                    { label: 'Generate Train/Test Split', state: generateSplitData, setState: setGenerateSplitData }
+                  ].map((item) => (
+                    <div 
+                      key={item.label} 
+                      onClick={() => item.setState(!item.state)}
+                      className={`flex items-center justify-between p-3 rounded-lg border cursor-pointer transition-colors ${item.state ? 'bg-white/5 border-[#ccff00]/30' : 'bg-transparent border-white/5 hover:border-white/20'}`}
+                    >
+                      <span className={`text-sm ${item.state ? 'text-white' : 'text-gray-300'}`}>{item.label}</span>
+                      <div className={`w-4 h-4 rounded-full transition-all ${item.state ? 'bg-[#ccff00] shadow-[0_0_10px_rgba(204,255,0,0.5)]' : 'bg-gray-800'}`} />
+                    </div>
+                  ))}
+                </div>
+
                 <button 
-                  className="upload-btn" 
-                  onClick={handleUpload} 
-                  disabled={uploading}
+                  onClick={startProcessing}
+                  disabled={isProcessing}
+                  className={`w-full py-4 rounded-lg font-bold text-black transition-all ${isProcessing ? 'bg-gray-600 cursor-not-allowed' : 'bg-[#ccff00] hover:bg-[#b3e600] hover:scale-[1.02]'}`}
                 >
-                  {uploading ? 'Analyzing Dataset...' : 'Start Profiling'}
+                  {isProcessing ? 'PROCESSING...' : 'RUN PIPELINE'}
                 </button>
               </div>
-            )}
-          </div>
-        ) : (
-          <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2rem'}}>
-            <div>
-              <h2 style={{margin: 0, color: 'var(--text-main)'}}>Current Dataset: {dataset?.name}</h2>
-              <p style={{color: 'var(--text-secondary)'}}>Ready for pipeline configuration</p>
             </div>
-            <button 
-              className="btn-secondary"
-              onClick={() => {
-                setProfile(null);
-                setDataset(null);
-                setFile(null);
-                setCleanResult(null);
-              }}
-            >
-              Upload New File
-            </button>
-          </div>
-        )}
-      </div>
 
-      {error && (
-        <div style={{
-          background: 'rgba(239, 68, 68, 0.1)', 
-          color: '#ef4444', 
-          padding: '1rem', 
-          borderRadius: '0.5rem', 
-          marginBottom: '2rem',
-          border: '1px solid #ef4444'
-        }}>
-          Error: {error}
-        </div>
-      )}
-
-      {profile && (
-        <div className="profile-section fade-in">
-          <div className="section-header">
-            <h2 className="section-title">Data Profile & Pipeline Builder</h2>
-            <div className="stats-bar">
-              <div className="stat-item">Rows <span className="stat-value">{profile.rows}</span></div>
-              <div className="stat-item">Columns <span className="stat-value">{profile.columns.length}</span></div>
-            </div>
-          </div>
-
-          <div className="columns-grid">
-            {profile.columns.map((col) => (
-              <div key={col.name} className={`column-card ${col.issues?.length > 0 ? 'has-issues' : ''}`}>
-                <div className="col-header">
-                  <span className="col-name">{col.name}</span>
-                  <span className="col-type">{col.inferred_type}</span>
-                </div>
-                
-                {col.issues && col.issues.length > 0 && (
-                  <div className="issue-tag">
-                    {col.issues[0]} {col.issues.length > 1 && `+${col.issues.length - 1} more`}
-                  </div>
-                )}
-                
-                <div className="col-details">
-                  <div className="col-detail-row">
-                    <span>Missing</span>
-                    <strong>{col.missing_pct.toFixed(1)}%</strong>
-                  </div>
-                  <div className="col-detail-row">
-                    <span>Unique</span>
-                    <strong>{col.unique}</strong>
-                  </div>
-                  {col.inferred_type === 'numeric' && (
-                    <>
-                      <div className="col-detail-row">
-                        <span>Mean</span>
-                        <strong>{col.mean?.toFixed(2)}</strong>
-                      </div>
-                      {col.outliers_count > 0 && (
-                        <div className="col-detail-row" style={{color: '#f59e0b'}}>
-                          <span>Outliers</span>
-                          <strong>{col.outliers_count}</strong>
-                        </div>
-                      )}
-                    </>
-                  )}
-                </div>
-
-                <select 
-                  className="action-select"
-                  onChange={(e) => handleActionChange(col.name, e.target.value)}
-                  value={pipelineSteps[col.name] ? `${pipelineSteps[col.name].action}:${pipelineSteps[col.name].method || ''}` : ""}
+            {/* Right: Visualization & Output */}
+            <div className="w-full md:w-2/3 space-y-6">
+              
+              {/* Tab Navigation */}
+              <div className="flex gap-4 border-b border-white/10 pb-1">
+                <button 
+                  onClick={() => setActiveTab('config')}
+                  className={`pb-3 text-sm font-medium transition-colors border-b-2 ${activeTab === 'config' ? 'border-[#ccff00] text-white' : 'border-transparent text-gray-500 hover:text-white'}`}
                 >
-                  <option value="">No Action</option>
-                  <option value="drop:">Drop Column</option>
-                  {col.inferred_type === 'numeric' && (
-                    <>
-                      <option value="impute:mean">Impute Mean</option>
-                      <option value="impute:median">Impute Median</option>
-                      <option value="scale:standard">Standard Scale</option>
-                      <option value="scale:minmax">MinMax Scale</option>
-                    </>
-                  )}
-                  {(col.inferred_type === 'text' || col.inferred_type === 'object') && (
-                    <>
-                      <option value="impute:mode">Impute Mode</option>
-                      <option value="encode:onehot">One-Hot Encode</option>
-                      <option value="encode:label">Label Encode</option>
-                    </>
-                  )}
-                </select>
+                  Dataset Overview
+                </button>
+                <button 
+                  onClick={() => setActiveTab('features')}
+                  className={`pb-3 text-sm font-medium transition-colors border-b-2 ${activeTab === 'features' ? 'border-[#ccff00] text-white' : 'border-transparent text-gray-500 hover:text-white'}`}
+                >
+                  Feature Engineering
+                </button>
               </div>
-            ))}
-          </div>
 
-          <div className="action-bar fade-in">
-            <button className="run-btn" onClick={handleClean} disabled={cleaning}>
-              {cleaning ? 'Running Pipeline...' : 'Run Cleaning Pipeline'}
-            </button>
-          </div>
-          
-          {/* Advanced Pipeline Operations Section */}
-          <div className="pipeline-operations-section fade-in" style={{marginTop: '3rem'}}>
-            <div className="section-header">
-              <h2 className="section-title">Advanced Dataset Operations</h2>
-              <p style={{color: 'var(--text-secondary)', marginTop: '0.5rem'}}>
-                Choose how to process your dataset: clean only, split, or combine operations
-              </p>
-            </div>
-            
-            <div className="operation-selector" style={{marginBottom: '2rem'}}>
-              <div className="radio-group">
-                <label className={`radio-option ${operationType === 'clean_only' ? 'selected' : ''}`}>
-                  <input
-                    type="radio"
-                    name="operation"
-                    value="clean_only"
-                    checked={operationType === 'clean_only'}
-                    onChange={(e) => setOperationType(e.target.value)}
-                  />
-                  <div>
-                    <strong>Clean Dataset Only</strong>
-                    <p>Apply cleaning pipeline without splitting</p>
-                  </div>
-                </label>
-                
-                <label className={`radio-option ${operationType === 'split' ? 'selected' : ''}`}>
-                  <input
-                    type="radio"
-                    name="operation"
-                    value="split"
-                    checked={operationType === 'split'}
-                    onChange={(e) => setOperationType(e.target.value)}
-                  />
-                  <div>
-                    <strong>Split Dataset (Train/Test)</strong>
-                    <p>Split raw dataset into training and test sets</p>
-                  </div>
-                </label>
-                
-                <label className={`radio-option ${operationType === 'clean_and_split' ? 'selected' : ''}`}>
-                  <input
-                    type="radio"
-                    name="operation"
-                    value="clean_and_split"
-                    checked={operationType === 'clean_and_split'}
-                    onChange={(e) => setOperationType(e.target.value)}
-                  />
-                  <div>
-                    <strong>Clean + Train/Test Split</strong>
-                    <p>Clean dataset first, then split into train/test</p>
-                  </div>
-                </label>
-                
-                <label className={`radio-option ${operationType === 'cross_validation' ? 'selected' : ''}`}>
-                  <input
-                    type="radio"
-                    name="operation"
-                    value="cross_validation"
-                    checked={operationType === 'cross_validation'}
-                    onChange={(e) => setOperationType(e.target.value)}
-                  />
-                  <div>
-                    <strong>Cross-Validation Split</strong>
-                    <p>Split dataset into K folds for cross-validation</p>
-                  </div>
-                </label>
-                
-                <label className={`radio-option ${operationType === 'clean_and_cv' ? 'selected' : ''}`}>
-                  <input
-                    type="radio"
-                    name="operation"
-                    value="clean_and_cv"
-                    checked={operationType === 'clean_and_cv'}
-                    onChange={(e) => setOperationType(e.target.value)}
-                  />
-                  <div>
-                    <strong>Clean + Cross-Validation</strong>
-                    <p>Clean dataset first, then perform K-fold split</p>
-                  </div>
-                </label>
-              </div>
-            </div>
-            
-            {/* Conditional Inputs */}
-            <div className="pipeline-config">
-              {(operationType === 'split' || operationType === 'clean_and_split') && (
-                <div className="config-group fade-in">
-                  <h3>Train/Test Split Configuration</h3>
-                  <div className="input-row">
-                    <div className="input-group">
-                      <label>Test Size: {(testSize * 100).toFixed(0)}%</label>
-                      <input
-                        type="range"
-                        min="0.1"
-                        max="0.4"
-                        step="0.05"
-                        value={testSize}
-                        onChange={(e) => setTestSize(parseFloat(e.target.value))}
-                      />
-                      <small>Train: {((1 - testSize) * 100).toFixed(0)}% | Test: {(testSize * 100).toFixed(0)}%</small>
+              {/* Data Health Grid (Bento) */}
+              {activeTab === 'config' && (
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                  <div className="col-span-2 md:col-span-2 bg-[#0a0a0a] border border-white/10 p-6 rounded-xl relative overflow-hidden group">
+                    <div className="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity">
+                      <Database size={60} />
+                    </div>
+                    <div className="text-gray-500 text-xs uppercase font-mono mb-2">Total Records</div>
+                    <div className="text-4xl font-bold text-white">
+                      {profile?.shape?.[0]?.toLocaleString() || (dataset ? '...' : '0')}
+                    </div>
+                    <div className="text-emerald-500 text-xs mt-2 flex items-center gap-1">
+                      <CheckCircle size={10} /> {dataset ? '100% Load Success' : 'No Data'}
                     </div>
                   </div>
-                </div>
-              )}
-              
-              {(operationType === 'cross_validation' || operationType === 'clean_and_cv') && (
-                <div className="config-group fade-in">
-                  <h3>Cross-Validation Configuration</h3>
-                  <div className="input-row">
-                    <div className="input-group">
-                      <label>Number of Folds (K)</label>
-                      <input
-                        type="number"
-                        min="2"
-                        max="10"
-                        value={nFolds}
-                        onChange={(e) => setNFolds(parseInt(e.target.value))}
+
+                  <div className="col-span-1 bg-[#0a0a0a] border border-white/10 p-4 rounded-xl">
+                    <div className="text-gray-500 text-xs uppercase font-mono mb-1">Missing</div>
+                    <div className="text-2xl font-bold text-white">
+                      {profile?.missing_values ? 
+                        ((Object.values(profile.missing_values).reduce((a, b) => a + b, 0) / (profile.shape[0] * profile.shape[1]) * 100).toFixed(1)) 
+                        : '0'}%
+                    </div>
+                    <div className="w-full bg-gray-800 h-1 mt-3 rounded-full overflow-hidden">
+                      <div 
+                        className="bg-red-500 h-full" 
+                        style={{ width: `${profile?.missing_values ? ((Object.values(profile.missing_values).reduce((a, b) => a + b, 0) / (profile.shape[0] * profile.shape[1]) * 100)) : 0}%` }} 
                       />
                     </div>
-                    <div className="input-group">
-                      <label>
-                        <input
-                          type="checkbox"
-                          checked={shuffle}
-                          onChange={(e) => setShuffle(e.target.checked)}
+                  </div>
+
+                  <div className="col-span-1 bg-[#0a0a0a] border border-white/10 p-4 rounded-xl">
+                    <div className="text-gray-500 text-xs uppercase font-mono mb-1">Columns</div>
+                    <div className="text-2xl font-bold text-white">{profile?.shape?.[1] || '0'}</div>
+                    <div className="text-xs text-gray-500 mt-2">Features Detected</div>
+                  </div>
+
+                  {/* Feature Distribution Graph Mockup */}
+                  <div className="col-span-2 md:col-span-4 bg-[#0a0a0a] border border-white/10 p-6 rounded-xl h-48 flex flex-col justify-between">
+                    <div className="flex justify-between items-center">
+                       <span className="text-sm font-bold">Feature Distribution (Target Variable)</span>
+                       <BarChart size={16} className="text-gray-500" />
+                    </div>
+                    <div className="flex items-end gap-2 h-24 w-full">
+                      {[40, 65, 45, 90, 30, 60, 55, 80, 50, 75, 40, 95, 60, 45, 70, 85].map((h, i) => (
+                        <div 
+                          key={i} 
+                          className="flex-1 bg-white/10 hover:bg-[#ccff00] transition-all duration-300 rounded-t-sm"
+                          style={{ height: `${h}%` }} 
                         />
-                        Shuffle data before splitting
-                      </label>
+                      ))}
                     </div>
                   </div>
                 </div>
               )}
-              
-              <div className="config-group">
-                <div className="input-row">
-                  <div className="input-group">
-                    <label>Random Seed (optional)</label>
-                    <input
-                      type="number"
-                      value={randomState}
-                      onChange={(e) => setRandomState(parseInt(e.target.value))}
-                      placeholder="42"
-                    />
-                    <small>Set seed for reproducible results</small>
+
+              {/* Results Panel */}
+              {(cleanedFileUrl || pipelineResults) && (
+                <div className="bg-gradient-to-br from-[#0f0f0f] to-[#0a0a0a] rounded-xl border border-[#ccff00]/20 p-5 shadow-lg">
+                  <div className="flex items-center justify-between mb-4">
+                    <div className="flex items-center gap-2">
+                      <CheckCircle className="text-[#ccff00]" size={18} />
+                      <span className="font-bold text-white">Pipeline Results</span>
+                    </div>
+                    <span className="text-[10px] bg-emerald-500/20 text-emerald-400 px-2 py-1 rounded-full uppercase tracking-wider">Success</span>
+                  </div>
+                  
+                  {/* Results Grid - Extended */}
+                  <div className="grid grid-cols-3 md:grid-cols-6 gap-2 mb-4">
+                    <div className="bg-black/40 rounded-lg p-3 border border-white/5">
+                      <div className="flex items-center gap-1 text-[9px] text-gray-500 uppercase tracking-wider mb-1">
+                        <GitBranch size={10} />Train
+                      </div>
+                      <div className="text-base font-bold text-[#ccff00]">{splitRatio}%</div>
+                    </div>
+                    <div className="bg-black/40 rounded-lg p-3 border border-white/5">
+                      <div className="flex items-center gap-1 text-[9px] text-gray-500 uppercase tracking-wider mb-1">
+                        <FileCheck size={10} />Test
+                      </div>
+                      <div className="text-base font-bold text-blue-400">{100-splitRatio}%</div>
+                    </div>
+                    <div className="bg-black/40 rounded-lg p-3 border border-white/5">
+                      <div className="flex items-center gap-1 text-[9px] text-gray-500 uppercase tracking-wider mb-1">
+                        <Layers size={10} />K-Folds
+                      </div>
+                      <div className="text-base font-bold text-white">{kFolds}</div>
+                    </div>
+                    <div className="bg-black/40 rounded-lg p-3 border border-white/5">
+                      <div className="flex items-center gap-1 text-[9px] text-gray-500 uppercase tracking-wider mb-1">
+                        <Activity size={10} />Epochs
+                      </div>
+                      <div className="text-base font-bold text-white">{epochs}</div>
+                    </div>
+                    <div className="bg-black/40 rounded-lg p-3 border border-white/5">
+                      <div className="flex items-center gap-1 text-[9px] text-gray-500 uppercase tracking-wider mb-1">
+                        <Database size={10} />Rows
+                      </div>
+                      <div className="text-base font-bold text-white">{profile?.shape?.[0]?.toLocaleString() || '-'}</div>
+                    </div>
+                    <div className="bg-black/40 rounded-lg p-3 border border-white/5">
+                      <div className="flex items-center gap-1 text-[9px] text-gray-500 uppercase tracking-wider mb-1">
+                        <BarChart size={10} />Cols
+                      </div>
+                      <div className="text-base font-bold text-white">{profile?.shape?.[1] || '-'}</div>
+                    </div>
+                  </div>
+
+                  {/* Processing Options Summary */}
+                  <div className="flex flex-wrap gap-2 mb-4">
+                    {removeOutliers && (
+                      <span className="text-[10px] bg-white/5 text-gray-400 px-2 py-1 rounded border border-white/10">Outliers Removed</span>
+                    )}
+                    {imputeMissing && (
+                      <span className="text-[10px] bg-white/5 text-gray-400 px-2 py-1 rounded border border-white/10">Missing Imputed (KNN)</span>
+                    )}
+                    {normalizeFeatures && (
+                      <span className="text-[10px] bg-white/5 text-gray-400 px-2 py-1 rounded border border-white/10">Features Normalized</span>
+                    )}
+                    {generateSplitData && splitZipUrl && (
+                      <span className="text-[10px] bg-[#ccff00]/10 text-[#ccff00] px-2 py-1 rounded border border-[#ccff00]/20">Train/Test Split Generated</span>
+                    )}
+                  </div>
+
+                  {/* Download Buttons */}
+                  <div className="space-y-3">
+                    {/* Main Cleaned Dataset */}
+                    {cleanedFileUrl && (
+                      <a 
+                        href={cleanedFileUrl}
+                        download
+                        className="flex items-center justify-center gap-3 w-full py-4 bg-[#ccff00] text-black rounded-lg hover:bg-[#b3e600] transition-all font-bold text-sm uppercase tracking-wider hover:scale-[1.02] shadow-lg shadow-[#ccff00]/20"
+                      >
+                        <Download size={18} /> Download Cleaned Dataset
+                      </a>
+                    )}
+
+                    {/* Train/Test Split ZIP Download */}
+                    {splitZipUrl && (
+                      <a 
+                        href={splitZipUrl}
+                        download="train_test_split.zip"
+                        className="flex items-center justify-center gap-2 w-full py-3 bg-gradient-to-r from-emerald-500/20 to-blue-500/20 text-white border border-white/10 rounded-lg hover:from-emerald-500/30 hover:to-blue-500/30 transition-all font-bold text-xs uppercase tracking-wider"
+                      >
+                        <Download size={14} /> Download Train/Test Split (ZIP) • {splitRatio}% / {100-splitRatio}%
+                      </a>
+                    )}
                   </div>
                 </div>
-              </div>
-            </div>
-            
-            <div className="action-bar fade-in" style={{marginTop: '2rem'}}>
-              <button 
-                className="run-btn" 
-                onClick={handleRunPipeline} 
-                disabled={runningPipeline}
-                style={{width: '100%', padding: '1.2rem'}}
-              >
-                {runningPipeline ? 'Running Pipeline...' : 'Run Data Pipeline'}
-              </button>
-            </div>
-          </div>
-          
-          {/* Pipeline Results Section */}
-          {pipelineResult && (
-            <div id="pipeline-results-section" className="results-container fade-in" style={{marginTop: '3rem'}}>
-              <div className="results-header">
-                <div>
-                  <h2 style={{margin: 0}}>Pipeline Complete</h2>
-                  <p style={{color: '#666'}}>Operation: {operationType.replace(/_/g, ' ').toUpperCase()}</p>
+              )}
+
+              {/* Terminal / Logs Output - Compact */}
+              <div className="bg-[#0a0a0a] rounded-lg border border-white/5 p-3 font-mono shadow-inner">
+                <div className="flex items-center gap-2 border-b border-white/5 pb-2 mb-2 text-gray-600">
+                  <TerminalIcon size={12} />
+                  <span className="text-[10px] uppercase tracking-wider">System Log</span>
+                  {isProcessing && <span className="ml-auto text-[10px] text-[#ccff00] animate-pulse">● Processing</span>}
                 </div>
-              </div>
-              
-              {/* Output Files */}
-              <div className="output-files" style={{marginTop: '2rem'}}>
-                <h3>Download Output Files</h3>
-                <div className="file-grid">
-                  {pipelineResult.output_files && pipelineResult.output_files.map((file, idx) => (
-                    <div key={idx} className="file-card">
-                      <div className="file-icon">📄</div>
-                      <div className="file-info">
-                        <strong>{file.name}</strong>
-                        <p>{file.rows} rows × {file.columns} columns</p>
-                      </div>
-                      <a 
-                        href={`http://localhost:5000${file.path}`} 
-                        download
-                        className="btn-secondary"
-                        style={{fontSize: '0.9rem'}}
-                      >
-                        Download
-                      </a>
+                <div className="max-h-32 overflow-y-auto space-y-0.5 scrollbar-thin scrollbar-thumb-white/10">
+                  {logs.length === 0 && !isProcessing && (
+                    <span className="text-gray-700 text-[11px] italic">Ready to process...</span>
+                  )}
+                  {logs.map((log, i) => (
+                    <div key={i} className="text-[11px] text-gray-500 flex items-start gap-1.5 leading-tight">
+                      <span className="text-[#ccff00]/60 text-[10px]">›</span>
+                      <span className="truncate">{typeof log === 'string' && log.length > 80 ? log.substring(0, 80) + '...' : log}</span>
                     </div>
                   ))}
                 </div>
               </div>
-              
-              {/* Metadata Summary */}
-              {pipelineResult.metadata && (
-                <div style={{marginTop: '2rem'}}>
-                  <h3>Pipeline Summary</h3>
-                  <div className="metadata-grid">
-                    <div className="metadata-item">
-                      <span>Rows Before</span>
-                      <strong>{pipelineResult.metadata.rows_before}</strong>
-                    </div>
-                    {pipelineResult.metadata.rows_after_cleaning && (
-                      <div className="metadata-item">
-                        <span>Rows After Cleaning</span>
-                        <strong>{pipelineResult.metadata.rows_after_cleaning}</strong>
-                      </div>
-                    )}
-                    {pipelineResult.metadata.split_type && (
-                      <div className="metadata-item">
-                        <span>Split Type</span>
-                        <strong>{pipelineResult.metadata.split_type}</strong>
-                      </div>
-                    )}
-                    {pipelineResult.metadata.test_size && (
-                      <div className="metadata-item">
-                        <span>Test Size</span>
-                        <strong>{(pipelineResult.metadata.test_size * 100).toFixed(0)}%</strong>
-                      </div>
-                    )}
-                    {pipelineResult.metadata.n_folds && (
-                      <div className="metadata-item">
-                        <span>Number of Folds</span>
-                        <strong>{pipelineResult.metadata.n_folds}</strong>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              )}
-              
-              {/* Transformation Log */}
-              {pipelineResult.transformation_log && pipelineResult.transformation_log.length > 0 && (
-                <div style={{marginTop: '2rem'}}>
-                  <h3>Transformation Log</h3>
-                  <div className="log-list">
-                    {pipelineResult.transformation_log.map((log, i) => (
-                      <div key={i} className="log-item">
-                        <span style={{color: '#10b981'}}>✓</span> {log}
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
 
-          {cleanResult && (
-            <div id="results-section" className="results-container">
-              <div className="results-header">
-                <div>
-                  <h2 style={{margin: 0}}>Cleaning Complete</h2>
-                  <p style={{color: '#666'}}>Your data has been transformed successfully.</p>
-                </div>
-                <div className="btn-group">
-                  <button 
-                    className="btn-primary"
-                    onClick={() => downloadFile(cleanResult.run_id)}
-                  >
-                    Download Cleaned Data
-                  </button>
-                  <button 
-                    className="btn-secondary"
-                    onClick={() => setShowPythonCode(!showPythonCode)}
-                  >
-                    {showPythonCode ? 'Hide Code' : 'Show Python Code'}
-                  </button>
-                </div>
-              </div>
-              
-              {showPythonCode && cleanResult.python_code && (
-                <div className="fade-in">
-                  <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem'}}>
-                    <h3>Generated Python Pipeline</h3>
-                    <button className="btn-secondary" style={{fontSize: '0.8rem'}} onClick={copyPythonCode}>
-                      Copy Code
-                    </button>
-                  </div>
-                  <pre className="code-block">
-                    <code>{cleanResult.python_code}</code>
-                  </pre>
-                </div>
-              )}
-
-              {cleanResult.preview && cleanResult.preview.length > 0 && (
-                <div className="fade-in" style={{marginTop: '2rem'}}>
-                  <h3>Cleaned Data Preview (First 20 Rows)</h3>
-                  <div className="table-container">
-                    <table className="data-table">
-                      <thead>
-                        <tr>
-                          {cleanResult.columns.map((col) => (
-                            <th key={col}>{col}</th>
-                          ))}
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {cleanResult.preview.map((row, idx) => (
-                          <tr key={idx}>
-                            {cleanResult.columns.map((col) => (
-                              <td key={`${idx}-${col}`}>
-                                {row[col] !== null ? String(row[col]) : <span style={{color: '#ccc'}}>null</span>}
-                              </td>
-                            ))}
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-              )}
-              
-              <h3>Transformation Log</h3>
-              <div className="log-list">
-                {cleanResult.transformation_log.map((log, i) => (
-                  <div key={i} className="log-item">
-                    <span style={{color: '#10b981'}}>✓</span> {log}
-                  </div>
-                ))}
-              </div>
             </div>
-          )}
+          </div>
+        </Reveal>
+      </section>
+
+      {/* Feature Engineering Showcase Section */}
+      <section className="py-20 bg-[#050505] border-t border-white/5">
+        <div className="max-w-[1600px] mx-auto px-6">
+          <Reveal>
+            <h2 className="text-3xl md:text-5xl font-bold mb-12 flex items-center gap-4">
+              <BrainCircuit className="text-[#ccff00]" size={40} />
+              Intelligent Transformations
+            </h2>
+          </Reveal>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
+            {[
+              { title: 'Auto-Scaling', icon: <BarChart />, desc: 'Automatically applies MinMax or StandardScaler based on distribution variance.' },
+              { title: 'Smart Encoding', icon: <LayoutTemplate />, desc: 'Detects categorical columns and applies One-Hot or Label Encoding optimized for cardinality.' },
+              { title: 'Data Splitting', icon: <GitBranch />, desc: 'Stratified sampling ensures your Test set represents the real world accurately.' },
+            ].map((feature, i) => (
+              <Reveal key={i} delay={i * 100}>
+                <div className="p-8 border border-white/10 rounded-2xl bg-[#0a0a0a] hover:border-[#ccff00]/50 transition-colors group">
+                  <div className="w-12 h-12 bg-white/5 rounded-lg flex items-center justify-center mb-6 text-white group-hover:text-[#ccff00] group-hover:bg-[#ccff00]/10 transition-all">
+                    {feature.icon}
+                  </div>
+                  <h3 className="text-xl font-bold mb-3">{feature.title}</h3>
+                  <p className="text-gray-400 leading-relaxed">{feature.desc}</p>
+                </div>
+              </Reveal>
+            ))}
+          </div>
         </div>
-      )}
+      </section>
+
+      {/* Footer */}
+      <footer className="border-t border-white/10 py-12 text-center text-gray-500 text-sm bg-black">
+        <p>AUTOKLEAN v1.0 • AUTO-CLEANING ENGINE</p>
+      </footer>
     </div>
   );
-}
+};
 
-export default App;
+export default AutoKlean;

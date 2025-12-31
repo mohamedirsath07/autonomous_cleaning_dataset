@@ -2,6 +2,8 @@ const express = require('express');
 const router = express.Router();
 const multer = require('multer');
 const path = require('path');
+const fs = require('fs');
+const archiver = require('archiver');
 const Dataset = require('../models/Dataset');
 const Profile = require('../models/Profile');
 const PipelineRun = require('../models/PipelineRun');
@@ -19,7 +21,186 @@ const storage = multer.diskStorage({
 
 const upload = multer({ storage: storage });
 
-// POST /api/datasets - Upload dataset
+// POST /api/datasets/upload - Upload dataset with auto-profiling (new endpoint for AutoKlean)
+router.post('/upload', upload.single('file'), async (req, res) => {
+    console.log("Received file upload request (AutoKlean)");
+    try {
+        if (!req.file) {
+            console.log("No file in request");
+            return res.status(400).json({ message: 'No file uploaded' });
+        }
+        console.log("File uploaded:", req.file);
+
+        const newDataset = new Dataset({
+            name: req.file.originalname,
+            file_path: req.file.path,
+        });
+
+        const savedDataset = await newDataset.save();
+        console.log("Dataset saved to DB:", savedDataset);
+
+        // Auto-profile the dataset
+        const pythonServiceUrl = process.env.PYTHON_SERVICE_URL || 'http://localhost:8000';
+        const absolutePath = path.resolve(savedDataset.file_path);
+        
+        try {
+            const profileResponse = await axios.post(`${pythonServiceUrl}/profile`, {
+                file_path: absolutePath
+            });
+
+            // Save profile to database
+            const newProfile = new Profile({
+                dataset_id: savedDataset._id,
+                columns: profileResponse.data.columns,
+                rows: profileResponse.data.rows
+            });
+            await newProfile.save();
+
+            // Return dataset with profile info
+            res.status(201).json({
+                _id: savedDataset._id,
+                filename: savedDataset.name,
+                fileSize: req.file.size,
+                profile: {
+                    shape: [profileResponse.data.rows, profileResponse.data.columns.length],
+                    missing_values: profileResponse.data.columns.reduce((acc, col) => {
+                        acc[col.name] = Math.round(col.missing_pct / 100 * profileResponse.data.rows);
+                        return acc;
+                    }, {}),
+                    dtypes: profileResponse.data.columns.reduce((acc, col) => {
+                        acc[col.name] = col.inferred_type;
+                        return acc;
+                    }, {})
+                }
+            });
+        } catch (profileError) {
+            console.error("Error profiling dataset:", profileError.message);
+            // Return dataset without profile if profiling fails
+            res.status(201).json({
+                _id: savedDataset._id,
+                filename: savedDataset.name,
+                fileSize: req.file.size,
+                profile: null
+            });
+        }
+    } catch (error) {
+        console.error("Error in upload route:", error);
+        res.status(500).json({ message: 'Server error during upload' });
+    }
+});
+
+// POST /api/datasets/:id/clean - Clean dataset with configuration options (updated for AutoKlean)
+router.post('/:id/clean', async (req, res) => {
+    console.log(`Clean request for ID: ${req.params.id}`);
+    try {
+        const dataset = await Dataset.findById(req.params.id);
+        if (!dataset) {
+            return res.status(404).json({ message: 'Dataset not found' });
+        }
+
+        const { 
+            splitRatio = 0.8,
+            kFolds = 5,
+            epochs = 100,
+            removeOutliers = true,
+            imputeMissing = true,
+            normalizeFeatures = true
+        } = req.body;
+
+        const pythonServiceUrl = process.env.PYTHON_SERVICE_URL || 'http://localhost:8000';
+        const absolutePath = path.resolve(dataset.file_path);
+        
+        console.log("Sending auto-clean request to Python service with config:", {
+            splitRatio, kFolds, epochs, removeOutliers, imputeMissing, normalizeFeatures
+        });
+
+        const response = await axios.post(`${pythonServiceUrl}/auto-clean`, {
+            file_path: absolutePath,
+            split_ratio: splitRatio,
+            k_folds: kFolds,
+            epochs: epochs,
+            remove_outliers: removeOutliers,
+            impute_missing: imputeMissing,
+            normalize_features: normalizeFeatures
+        });
+
+        console.log("Received response from Python service (auto-clean)");
+        
+        // Save pipeline run to database
+        const newRun = new PipelineRun({
+            dataset_id: dataset._id,
+            pipeline_config: { 
+                splitRatio, kFolds, epochs, removeOutliers, imputeMissing, normalizeFeatures
+            },
+            cleaned_file_path: response.data.cleaned_file_path,
+            transformation_log: response.data.transformation_log || [],
+            python_code: response.data.python_code || ''
+        });
+        const savedRun = await newRun.save();
+        
+        // Generate download paths
+        const cleanedFilePath = response.data.cleaned_file_path;
+        const relativePath = cleanedFilePath.replace(/\\/g, '/');
+        const downloadPath = `/uploads/${path.basename(relativePath)}`;
+        
+        console.log("ML Response - train_file_path:", response.data.train_file_path);
+        console.log("ML Response - test_file_path:", response.data.test_file_path);
+        
+        // Generate train/test ZIP if both files exist
+        let splitZipPath = null;
+        
+        if (response.data.train_file_path && response.data.test_file_path) {
+            const trainPath = response.data.train_file_path;
+            const testPath = response.data.test_file_path;
+            const splitDir = path.dirname(trainPath);
+            const zipFileName = `${path.basename(splitDir)}_train_test.zip`;
+            const zipFilePath = path.join(splitDir, zipFileName);
+            
+            console.log("Creating ZIP at:", zipFilePath);
+            
+            try {
+                // Create ZIP file
+                await new Promise((resolve, reject) => {
+                    const output = fs.createWriteStream(zipFilePath);
+                    const archive = archiver('zip', { zlib: { level: 9 } });
+                    
+                    output.on('close', () => {
+                        console.log("ZIP created successfully, size:", archive.pointer(), "bytes");
+                        resolve();
+                    });
+                    archive.on('error', reject);
+                    
+                    archive.pipe(output);
+                    archive.file(trainPath, { name: 'train.csv' });
+                    archive.file(testPath, { name: 'test.csv' });
+                    archive.finalize();
+                });
+                
+                splitZipPath = `/uploads/${path.basename(splitDir)}/${zipFileName}`;
+                console.log("ZIP path for frontend:", splitZipPath);
+            } catch (zipError) {
+                console.error("Error creating ZIP:", zipError);
+            }
+        } else {
+            console.log("Train/Test paths not available, skipping ZIP creation");
+        }
+        
+        res.json({
+            ...response.data,
+            run_id: savedRun._id,
+            cleanedFilePath: downloadPath,
+            splitZipPath: splitZipPath
+        });
+    } catch (error) {
+        console.error("Error in clean route:", error.message);
+        if (error.response) {
+            console.error("Python service error data:", error.response.data);
+        }
+        res.status(500).json({ message: error.response?.data?.detail || 'Error cleaning dataset' });
+    }
+});
+
+// POST /api/datasets - Upload dataset (original endpoint)
 router.post('/', upload.single('file'), async (req, res) => {
     console.log("Received file upload request");
     try {

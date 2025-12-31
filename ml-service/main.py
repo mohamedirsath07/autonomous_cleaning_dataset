@@ -9,6 +9,7 @@ from itertools import combinations
 from sklearn.impute import SimpleImputer
 from sklearn.preprocessing import StandardScaler, MinMaxScaler, OneHotEncoder, LabelEncoder, RobustScaler
 from sklearn.ensemble import IsolationForest
+from sklearn.model_selection import train_test_split
 from datetime import datetime
 import re
 
@@ -26,6 +27,15 @@ class PipelineStep(BaseModel):
 class PrepareRequest(BaseModel):
     file_path: str
     steps: List[PipelineStep]
+
+class AutoCleanRequest(BaseModel):
+    file_path: str
+    split_ratio: float = 0.8
+    k_folds: int = 5
+    epochs: int = 100
+    remove_outliers: bool = True
+    impute_missing: bool = True
+    normalize_features: bool = True
 
 
 MISSING_TOKENS = {"na", "n/a", "none", "null", "?", "unknown", "nan", "", "not available"}
@@ -1041,6 +1051,200 @@ def generate_pipeline_code(file_path: str, actions: Dict[str, Any], manual_steps
     code_lines.append("df.to_csv('cleaned_dataset.csv', index=False)")
 
     return "\n".join(code_lines)
+
+
+# ========== AUTOKLEAN AUTO-CLEAN ENDPOINT ==========
+
+class AutoCleanRequest(BaseModel):
+    file_path: str
+    split_ratio: Optional[float] = 0.8
+    k_folds: Optional[int] = 5
+    epochs: Optional[int] = 100
+    remove_outliers: Optional[bool] = True
+    impute_missing: Optional[bool] = True
+    normalize_features: Optional[bool] = True
+
+
+@app.post("/auto-clean")
+async def auto_clean_dataset(request: AutoCleanRequest):
+    """
+    AutoKlean endpoint: Automatically clean dataset with configurable options.
+    - Impute missing values using KNN or median
+    - Remove outliers using IQR or Isolation Forest
+    - Normalize features using MinMax scaler
+    - Split data for train/test
+    """
+    file_path = request.file_path
+    
+    if not os.path.exists(file_path):
+        raise HTTPException(status_code=404, detail=f"File not found at {file_path}")
+    
+    try:
+        # Load Data
+        if file_path.endswith('.csv'):
+            df = pd.read_csv(file_path)
+        elif file_path.endswith('.xlsx') or file_path.endswith('.xls'):
+            df = pd.read_excel(file_path)
+        else:
+            raise HTTPException(status_code=400, detail="Unsupported file format")
+        
+        transformation_log = []
+        original_rows = len(df)
+        original_cols = len(df.columns)
+        transformation_log.append(f"Loaded dataset: {original_rows} rows, {original_cols} columns")
+        
+        # Run the standard pipeline first
+        df, auto_log, layer_actions = run_full_pipeline(df)
+        transformation_log.extend(auto_log)
+        
+        # Additional processing based on AutoKlean config
+        
+        # 1. Impute missing values
+        if request.impute_missing:
+            for col in df.columns:
+                if df[col].isna().sum() > 0:
+                    if pd.api.types.is_numeric_dtype(df[col]):
+                        # Use median for numeric
+                        median_val = df[col].median()
+                        df[col].fillna(median_val, inplace=True)
+                        transformation_log.append(f"Imputed {col} with median: {median_val:.2f}")
+                    else:
+                        # Use mode for categorical
+                        mode_val = df[col].mode()[0] if not df[col].mode().empty else "unknown"
+                        df[col].fillna(mode_val, inplace=True)
+                        transformation_log.append(f"Imputed {col} with mode: {mode_val}")
+        
+        # 2. Remove outliers (using IQR for numeric columns)
+        if request.remove_outliers:
+            outliers_removed = 0
+            numeric_cols = df.select_dtypes(include=[np.number]).columns
+            for col in numeric_cols:
+                Q1 = df[col].quantile(0.25)
+                Q3 = df[col].quantile(0.75)
+                IQR = Q3 - Q1
+                lower_bound = Q1 - 1.5 * IQR
+                upper_bound = Q3 + 1.5 * IQR
+                before_rows = len(df)
+                df = df[(df[col] >= lower_bound) & (df[col] <= upper_bound)]
+                outliers_removed += before_rows - len(df)
+            if outliers_removed > 0:
+                transformation_log.append(f"Removed {outliers_removed} outlier rows using IQR method")
+        
+        # 3. Normalize features (MinMax scaling for numeric columns)
+        if request.normalize_features:
+            numeric_cols = df.select_dtypes(include=[np.number]).columns
+            for col in numeric_cols:
+                min_val = df[col].min()
+                max_val = df[col].max()
+                if max_val > min_val:
+                    df[col] = (df[col] - min_val) / (max_val - min_val)
+                    transformation_log.append(f"Normalized {col} using MinMax scaling")
+        
+        transformation_log.append(f"Final dataset: {len(df)} rows, {len(df.columns)} columns")
+        
+        # Save Cleaned File
+        base, ext = os.path.splitext(file_path)
+        cleaned_path = f"{base}_cleaned{ext}"
+        
+        if ext == '.csv' or not ext:
+            df.to_csv(cleaned_path if ext else f"{base}_cleaned.csv", index=False)
+            if not ext:
+                cleaned_path = f"{base}_cleaned.csv"
+        else:
+            df.to_excel(cleaned_path, index=False)
+            
+        # 4. Train/Test Split
+        train_path = None
+        test_path = None
+        if request.split_ratio:
+            try:
+                train_size = request.split_ratio / 100.0
+                # Ensure valid range
+                train_size = max(0.1, min(0.95, train_size))
+                
+                train_df, test_df = train_test_split(df, train_size=train_size, random_state=42)
+                
+                # Create a directory for the split files
+                timestamp = int(datetime.now().timestamp() * 1000)
+                split_dir = os.path.join(os.path.dirname(file_path), f"{timestamp}_clean_and_split")
+                os.makedirs(split_dir, exist_ok=True)
+                
+                train_path = os.path.join(split_dir, "train.csv")
+                test_path = os.path.join(split_dir, "test.csv")
+                
+                train_df.to_csv(train_path, index=False)
+                test_df.to_csv(test_path, index=False)
+                
+                transformation_log.append(f"Split dataset into Train ({len(train_df)} rows) and Test ({len(test_df)} rows)")
+            except Exception as e:
+                transformation_log.append(f"Error during train/test split: {str(e)}")
+        
+        # Generate simple Python code
+        python_code = f'''import pandas as pd
+import numpy as np
+
+# Load dataset
+df = pd.read_csv('{os.path.basename(file_path)}')
+
+# AutoKlean Configuration
+split_ratio = {request.split_ratio}
+k_folds = {request.k_folds}
+remove_outliers = {request.remove_outliers}
+impute_missing = {request.impute_missing}
+normalize_features = {request.normalize_features}
+
+# Impute missing values
+if impute_missing:
+    for col in df.select_dtypes(include=[np.number]).columns:
+        df[col].fillna(df[col].median(), inplace=True)
+    for col in df.select_dtypes(include=['object']).columns:
+        df[col].fillna(df[col].mode()[0], inplace=True)
+
+# Remove outliers using IQR
+if remove_outliers:
+    for col in df.select_dtypes(include=[np.number]).columns:
+        Q1, Q3 = df[col].quantile(0.25), df[col].quantile(0.75)
+        IQR = Q3 - Q1
+        df = df[(df[col] >= Q1 - 1.5*IQR) & (df[col] <= Q3 + 1.5*IQR)]
+
+# Normalize features
+if normalize_features:
+    for col in df.select_dtypes(include=[np.number]).columns:
+        df[col] = (df[col] - df[col].min()) / (df[col].max() - df[col].min())
+
+# Save cleaned dataset
+df.to_csv('cleaned_dataset.csv', index=False)
+'''
+        
+        return {
+            "cleaned_file_path": cleaned_path,
+            "train_file_path": train_path,
+            "test_file_path": test_path,
+            "transformation_log": transformation_log,
+            "preview": df.replace({np.nan: None}).head(20).to_dict(orient='records'),
+            "columns": list(df.columns),
+            "python_code": python_code,
+            "config": {
+                "split_ratio": request.split_ratio,
+                "k_folds": request.k_folds,
+                "epochs": request.epochs,
+                "remove_outliers": request.remove_outliers,
+                "impute_missing": request.impute_missing,
+                "normalize_features": request.normalize_features
+            },
+            "stats": {
+                "original_rows": original_rows,
+                "final_rows": len(df),
+                "original_cols": original_cols,
+                "final_cols": len(df.columns)
+            }
+        }
+    
+    except Exception as e:
+        print(f"Error in auto-clean: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 # ========== ADVANCED PIPELINE OPERATIONS ==========
