@@ -14,6 +14,25 @@ const AuthModal = ({ isOpen, onClose, onLogin }) => {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
 
+  const googleLogin = useGoogleLogin({
+    onSuccess: async (tokenResponse) => {
+      setIsLoading(true);
+      try {
+        const response = await axios.post(`${API_URL}/api/auth/google`, {
+          token: tokenResponse.access_token
+        });
+        onLogin(response.data);
+        onClose();
+      } catch (err) {
+        console.error("Google Auth error:", err);
+        setError('Google authentication failed.');
+      } finally {
+        setIsLoading(false);
+      }
+    },
+    onError: () => setError('Google Login Failed'),
+  });
+
   if (!isOpen) return null;
 
   const handleSubmit = async (e) => {
@@ -42,25 +61,6 @@ const AuthModal = ({ isOpen, onClose, onLogin }) => {
       setIsLoading(false);
     }
   };
-
-  const googleLogin = useGoogleLogin({
-    onSuccess: async (tokenResponse) => {
-      setIsLoading(true);
-      try {
-        const response = await axios.post(`${API_URL}/api/auth/google`, {
-          token: tokenResponse.access_token
-        });
-        onLogin(response.data);
-        onClose();
-      } catch (err) {
-        console.error("Google Auth error:", err);
-        setError('Google authentication failed.');
-      } finally {
-        setIsLoading(false);
-      }
-    },
-    onError: () => setError('Google Login Failed'),
-  });
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm">
