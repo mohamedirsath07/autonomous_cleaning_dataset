@@ -13,8 +13,30 @@ from sklearn.model_selection import train_test_split
 from datetime import datetime
 import re
 import os
+import requests
+import tempfile
 
 app = FastAPI()
+
+def download_file_if_url(file_path: str) -> str:
+    """Download file from URL if it's a URL, otherwise return path as-is."""
+    if file_path.startswith('http://') or file_path.startswith('https://'):
+        response = requests.get(file_path)
+        response.raise_for_status()
+        
+        # Determine extension
+        ext = '.csv'
+        if '.xlsx' in file_path:
+            ext = '.xlsx'
+        elif '.xls' in file_path:
+            ext = '.xls'
+        
+        # Save to temp file
+        temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=ext)
+        temp_file.write(response.content)
+        temp_file.close()
+        return temp_file.name
+    return file_path
 
 @app.get("/health")
 def health_check():
@@ -624,16 +646,14 @@ def run_full_pipeline(df: pd.DataFrame) -> Tuple[pd.DataFrame, List[str], Dict[s
 
 @app.post("/profile")
 async def generate_profile(request: ProfileRequest):
-    file_path = request.file_path
-    
-    if not os.path.exists(file_path):
-        raise HTTPException(status_code=404, detail=f"File not found at {file_path}")
+    original_path = request.file_path
+    file_path = download_file_if_url(original_path)
     
     try:
         # Read the file
-        if file_path.endswith('.csv'):
+        if file_path.endswith('.csv') or original_path.endswith('.csv'):
             df = pd.read_csv(file_path)
-        elif file_path.endswith('.xlsx') or file_path.endswith('.xls'):
+        elif file_path.endswith('.xlsx') or file_path.endswith('.xls') or original_path.endswith('.xlsx') or original_path.endswith('.xls'):
             df = pd.read_excel(file_path)
         else:
             raise HTTPException(status_code=400, detail="Unsupported file format")
@@ -1079,16 +1099,14 @@ async def auto_clean_dataset(request: AutoCleanRequest):
     - Normalize features using MinMax scaler
     - Split data for train/test
     """
-    file_path = request.file_path
-    
-    if not os.path.exists(file_path):
-        raise HTTPException(status_code=404, detail=f"File not found at {file_path}")
+    original_path = request.file_path
+    file_path = download_file_if_url(original_path)
     
     try:
         # Load Data
-        if file_path.endswith('.csv'):
+        if file_path.endswith('.csv') or original_path.endswith('.csv'):
             df = pd.read_csv(file_path)
-        elif file_path.endswith('.xlsx') or file_path.endswith('.xls'):
+        elif file_path.endswith('.xlsx') or file_path.endswith('.xls') or original_path.endswith('.xlsx') or original_path.endswith('.xls'):
             df = pd.read_excel(file_path)
         else:
             raise HTTPException(status_code=400, detail="Unsupported file format")

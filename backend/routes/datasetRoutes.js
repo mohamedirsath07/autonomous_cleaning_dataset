@@ -41,11 +41,12 @@ router.post('/upload', upload.single('file'), async (req, res) => {
 
         // Auto-profile the dataset
         const pythonServiceUrl = process.env.PYTHON_SERVICE_URL || 'http://localhost:8000';
-        const absolutePath = path.resolve(savedDataset.file_path);
+        const backendUrl = process.env.BACKEND_URL || `http://localhost:${process.env.PORT || 5000}`;
+        const fileUrl = `${backendUrl}/uploads/${path.basename(savedDataset.file_path)}`;
         
         try {
             const profileResponse = await axios.post(`${pythonServiceUrl}/profile`, {
-                file_path: absolutePath
+                file_path: fileUrl
             });
 
             // Save profile to database
@@ -108,14 +109,15 @@ router.post('/:id/clean', async (req, res) => {
         } = req.body;
 
         const pythonServiceUrl = process.env.PYTHON_SERVICE_URL || 'http://localhost:8000';
-        const absolutePath = path.resolve(dataset.file_path);
+        const backendUrl = process.env.BACKEND_URL || `http://localhost:${process.env.PORT || 5000}`;
+        const fileUrl = `${backendUrl}/uploads/${path.basename(dataset.file_path)}`;
         
         console.log("Sending auto-clean request to Python service with config:", {
             splitRatio, kFolds, epochs, removeOutliers, imputeMissing, normalizeFeatures
         });
 
         const response = await axios.post(`${pythonServiceUrl}/auto-clean`, {
-            file_path: absolutePath,
+            file_path: fileUrl,
             split_ratio: splitRatio,
             k_folds: kFolds,
             epochs: epochs,
