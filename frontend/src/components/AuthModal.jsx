@@ -1,20 +1,45 @@
 import React, { useState } from 'react';
-import { X, Mail, Lock, User, Chrome } from 'lucide-react';
+import { X, Mail, Lock, User, Chrome, Loader2 } from 'lucide-react';
+import axios from 'axios';
+
+// API URL - uses environment variable in production, localhost in development
+const API_URL = import.meta.env.VITE_API_URL || 'http://127.0.0.1:5000';
 
 const AuthModal = ({ isOpen, onClose, onLogin }) => {
   const [isRegistering, setIsRegistering] = useState(false);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [name, setName] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState('');
 
   if (!isOpen) return null;
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
-    // TODO: Implement actual API call
-    // For now, mock login
-    onLogin({ name: name || email.split('@')[0], email });
-    onClose();
+    setIsLoading(true);
+    setError('');
+
+    try {
+      const endpoint = isRegistering ? '/api/auth/register' : '/api/auth/login';
+      const payload = isRegistering ? { name, email, password } : { email, password };
+      
+      const response = await axios.post(`${API_URL}${endpoint}`, payload);
+      
+      // Success
+      onLogin(response.data);
+      onClose();
+      
+      // Reset form
+      setEmail('');
+      setPassword('');
+      setName('');
+    } catch (err) {
+      console.error("Auth error:", err);
+      setError(err.response?.data?.message || 'Authentication failed. Please try again.');
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   return (
@@ -35,6 +60,12 @@ const AuthModal = ({ isOpen, onClose, onLogin }) => {
             {isRegistering ? 'Join AutoKlean today' : 'Sign in to continue cleaning'}
           </p>
         </div>
+
+        {error && (
+          <div className="mb-4 p-3 bg-red-500/10 border border-red-500/20 rounded-lg text-red-400 text-sm text-center">
+            {error}
+          </div>
+        )}
 
         <form onSubmit={handleSubmit} className="space-y-4">
           {isRegistering && (
@@ -86,9 +117,17 @@ const AuthModal = ({ isOpen, onClose, onLogin }) => {
 
           <button
             type="submit"
-            className="w-full bg-[#ccff00] text-black font-bold py-3 rounded-lg hover:bg-[#b3e600] transition-all hover:scale-[1.02] mt-2"
+            disabled={isLoading}
+            className="w-full bg-[#ccff00] text-black font-bold py-3 rounded-lg hover:bg-[#b3e600] transition-all hover:scale-[1.02] mt-2 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
           >
-            {isRegistering ? 'Create Account' : 'Sign In'}
+            {isLoading ? (
+              <>
+                <Loader2 size={18} className="animate-spin" />
+                Processing...
+              </>
+            ) : (
+              isRegistering ? 'Create Account' : 'Sign In'
+            )}
           </button>
         </form>
 

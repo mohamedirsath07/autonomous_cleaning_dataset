@@ -16,6 +16,7 @@ if (!fs.existsSync(uploadsDir)) {
 }
 
 const datasetRoutes = require('./routes/datasetRoutes');
+const authRoutes = require('./routes/authRoutes');
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -40,6 +41,7 @@ mongoose.connect(process.env.MONGO_URI || 'mongodb://localhost:27017/autonomous_
 
 // Routes
 app.use('/api/datasets', datasetRoutes);
+app.use('/api/auth', authRoutes);
 
 app.listen(PORT, () => {
     console.log(`Server running on port ${PORT}`);

@@ -56,13 +56,27 @@ const AutoKlean = () => {
   useEffect(() => {
     const handleScroll = () => setScrollY(window.scrollY);
     window.addEventListener('scroll', handleScroll, { passive: true });
+    
+    // Check for saved user
+    const savedUser = localStorage.getItem('user');
+    if (savedUser) {
+      setUser(JSON.parse(savedUser));
+    }
+
     return () => window.removeEventListener('scroll', handleScroll);
   }, []);
 
   // Handle Login
   const handleLogin = (userData) => {
     setUser(userData);
+    localStorage.setItem('user', JSON.stringify(userData));
     setShowAuthModal(false);
+  };
+
+  // Handle Logout
+  const handleLogout = () => {
+    setUser(null);
+    localStorage.removeItem('user');
   };
 
   // Handle File Upload
@@ -172,7 +186,7 @@ const AutoKlean = () => {
               <div className="flex items-center gap-3">
                 <span className="text-sm font-medium text-white">{user.name}</span>
                 <button 
-                  onClick={() => setUser(null)}
+                  onClick={handleLogout}
                   className="px-6 py-2.5 text-sm font-bold bg-white/10 text-white rounded-full hover:bg-white/20 transition-colors"
                 >
                   Sign Out
