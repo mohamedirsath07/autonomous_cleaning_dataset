@@ -127,20 +127,35 @@ router.post('/:id/clean', async (req, res) => {
         });
 
         console.log("Received response from Python service (auto-clean)");
+        console.log("Response has cleaned_csv_content:", !!response.data.cleaned_csv_content);
+        console.log("Response has train_csv_content:", !!response.data.train_csv_content);
         
         // Save cleaned file from base64 content
         let cleanedFilePath = null;
         let downloadPath = null;
         
         if (response.data.cleaned_csv_content) {
-            const timestamp = Date.now();
-            const cleanedFileName = `${timestamp}_cleaned.csv`;
-            cleanedFilePath = path.join(__dirname, '..', 'uploads', cleanedFileName);
-            
-            const cleanedData = Buffer.from(response.data.cleaned_csv_content, 'base64');
-            fs.writeFileSync(cleanedFilePath, cleanedData);
-            downloadPath = `/uploads/${cleanedFileName}`;
-            console.log("Saved cleaned file to:", cleanedFilePath);
+            try {
+                const timestamp = Date.now();
+                const cleanedFileName = `${timestamp}_cleaned.csv`;
+                const uploadsDir = path.join(__dirname, '..', 'uploads');
+                
+                // Ensure uploads directory exists
+                if (!fs.existsSync(uploadsDir)) {
+                    fs.mkdirSync(uploadsDir, { recursive: true });
+                }
+                
+                cleanedFilePath = path.join(uploadsDir, cleanedFileName);
+                
+                const cleanedData = Buffer.from(response.data.cleaned_csv_content, 'base64');
+                fs.writeFileSync(cleanedFilePath, cleanedData);
+                downloadPath = `/uploads/${cleanedFileName}`;
+                console.log("Saved cleaned file to:", cleanedFilePath);
+            } catch (saveError) {
+                console.error("Error saving cleaned file:", saveError);
+            }
+        } else {
+            console.log("No cleaned_csv_content in response");
         }
         
         // Save train/test files if provided
