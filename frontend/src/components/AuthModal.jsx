@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { X, Mail, Lock, User, Chrome, Loader2 } from 'lucide-react';
+import { useGoogleLogin } from '@react-oauth/google';
 import axios from 'axios';
 
 // API URL - uses environment variable in production, localhost in development
@@ -41,6 +42,25 @@ const AuthModal = ({ isOpen, onClose, onLogin }) => {
       setIsLoading(false);
     }
   };
+
+  const googleLogin = useGoogleLogin({
+    onSuccess: async (tokenResponse) => {
+      setIsLoading(true);
+      try {
+        const response = await axios.post(`${API_URL}/api/auth/google`, {
+          token: tokenResponse.access_token
+        });
+        onLogin(response.data);
+        onClose();
+      } catch (err) {
+        console.error("Google Auth error:", err);
+        setError('Google authentication failed.');
+      } finally {
+        setIsLoading(false);
+      }
+    },
+    onError: () => setError('Google Login Failed'),
+  });
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm">
@@ -140,7 +160,10 @@ const AuthModal = ({ isOpen, onClose, onLogin }) => {
           </div>
         </div>
 
-        <button className="w-full bg-white text-black font-medium py-2.5 rounded-lg hover:bg-gray-100 transition-all flex items-center justify-center gap-2">
+        <button 
+          onClick={() => googleLogin()}
+          className="w-full bg-white text-black font-medium py-2.5 rounded-lg hover:bg-gray-100 transition-all flex items-center justify-center gap-2"
+        >
           <Chrome size={18} />
           Google
         </button>
