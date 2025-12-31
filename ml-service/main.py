@@ -12,8 +12,13 @@ from sklearn.ensemble import IsolationForest
 from sklearn.model_selection import train_test_split
 from datetime import datetime
 import re
+import os
 
 app = FastAPI()
+
+@app.get("/health")
+def health_check():
+    return {"status": "ok", "timestamp": datetime.now().isoformat()}
 
 class ProfileRequest(BaseModel):
     file_path: str
@@ -1645,4 +1650,5 @@ def _generate_pipeline_code(req: PipelineRequest, log: List[str]) -> str:
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    port = int(os.environ.get("PORT", 8000))
+    uvicorn.run(app, host="0.0.0.0", port=port)
