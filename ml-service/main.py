@@ -1239,8 +1239,30 @@ if normalize_features:
 df.to_csv('cleaned_dataset.csv', index=False)
 '''
         
+        # Convert cleaned dataframe to CSV content for transfer
+        import io
+        import base64
+        
+        cleaned_csv_buffer = io.StringIO()
+        df.to_csv(cleaned_csv_buffer, index=False)
+        cleaned_csv_content = base64.b64encode(cleaned_csv_buffer.getvalue().encode()).decode()
+        
+        # Also encode train/test if they exist
+        train_csv_content = None
+        test_csv_content = None
+        if train_path and test_path:
+            train_buffer = io.StringIO()
+            test_buffer = io.StringIO()
+            train_df.to_csv(train_buffer, index=False)
+            test_df.to_csv(test_buffer, index=False)
+            train_csv_content = base64.b64encode(train_buffer.getvalue().encode()).decode()
+            test_csv_content = base64.b64encode(test_buffer.getvalue().encode()).decode()
+        
         return {
             "cleaned_file_path": cleaned_path,
+            "cleaned_csv_content": cleaned_csv_content,
+            "train_csv_content": train_csv_content,
+            "test_csv_content": test_csv_content,
             "train_file_path": train_path,
             "test_file_path": test_path,
             "transformation_log": transformation_log,

@@ -128,64 +128,80 @@ router.post('/:id/clean', async (req, res) => {
 
         console.log("Received response from Python service (auto-clean)");
         
+        // Save cleaned file from base64 content
+        let cleanedFilePath = null;
+        let downloadPath = null;
+        
+        if (response.data.cleaned_csv_content) {
+            const timestamp = Date.now();
+            const cleanedFileName = `${timestamp}_cleaned.csv`;
+            cleanedFilePath = path.join(__dirname, '..', 'uploads', cleanedFileName);
+            
+            const cleanedData = Buffer.from(response.data.cleaned_csv_content, 'base64');
+            fs.writeFileSync(cleanedFilePath, cleanedData);
+            downloadPath = `/uploads/${cleanedFileName}`;
+            console.log("Saved cleaned file to:", cleanedFilePath);
+        }
+        
+        // Save train/test files if provided
+        let trainFilePath = null;
+        let testFilePath = null;
+        let splitZipPath = null;
+        
+        if (response.data.train_csv_content && response.data.test_csv_content) {
+            const timestamp = Date.now();
+            const splitDir = path.join(__dirname, '..', 'uploads', `${timestamp}_split`);
+            fs.mkdirSync(splitDir, { recursive: true });
+            
+            trainFilePath = path.join(splitDir, 'train.csv');
+            testFilePath = path.join(splitDir, 'test.csv');
+            
+            const trainData = Buffer.from(response.data.train_csv_content, 'base64');
+            const testData = Buffer.from(response.data.test_csv_content, 'base64');
+            
+            fs.writeFileSync(trainFilePath, trainData);
+            fs.writeFileSync(testFilePath, testData);
+            
+            console.log("Saved train/test files to:", splitDir);
+            
+            // Create ZIP file
+            const zipFileName = `${timestamp}_train_test.zip`;
+            const zipFilePath = path.join(splitDir, zipFileName);
+            
+            try {
+                await new Promise((resolve, reject) => {
+                    const output = fs.createWriteStream(zipFilePath);
+                    const archive = archiver('zip', { zlib: { level: 9 } });
+                    
+                    output.on('close', () => {
+                        console.log("ZIP created successfully");
+                        resolve();
+                    });
+                    archive.on('error', reject);
+                    
+                    archive.pipe(output);
+                    archive.file(trainFilePath, { name: 'train.csv' });
+                    archive.file(testFilePath, { name: 'test.csv' });
+                    archive.finalize();
+                });
+                
+                splitZipPath = `/uploads/${timestamp}_split/${zipFileName}`;
+            } catch (zipError) {
+                console.error("Error creating ZIP:", zipError);
+            }
+        }
+        
         // Save pipeline run to database
         const newRun = new PipelineRun({
             dataset_id: dataset._id,
             pipeline_config: { 
                 splitRatio, kFolds, epochs, removeOutliers, imputeMissing, normalizeFeatures
             },
-            cleaned_file_path: response.data.cleaned_file_path,
+            cleaned_file_path: cleanedFilePath,
             transformation_log: response.data.transformation_log || [],
             python_code: response.data.python_code || ''
         });
         const savedRun = await newRun.save();
-        
-        // Generate download paths
-        const cleanedFilePath = response.data.cleaned_file_path;
-        const relativePath = cleanedFilePath.replace(/\\/g, '/');
-        const downloadPath = `/uploads/${path.basename(relativePath)}`;
-        
-        console.log("ML Response - train_file_path:", response.data.train_file_path);
-        console.log("ML Response - test_file_path:", response.data.test_file_path);
-        
-        // Generate train/test ZIP if both files exist
-        let splitZipPath = null;
-        
-        if (response.data.train_file_path && response.data.test_file_path) {
-            const trainPath = response.data.train_file_path;
-            const testPath = response.data.test_file_path;
-            const splitDir = path.dirname(trainPath);
-            const zipFileName = `${path.basename(splitDir)}_train_test.zip`;
-            const zipFilePath = path.join(splitDir, zipFileName);
-            
-            console.log("Creating ZIP at:", zipFilePath);
-            
-            try {
-                // Create ZIP file
-                await new Promise((resolve, reject) => {
-                    const output = fs.createWriteStream(zipFilePath);
-                    const archive = archiver('zip', { zlib: { level: 9 } });
-                    
-                    output.on('close', () => {
-                        console.log("ZIP created successfully, size:", archive.pointer(), "bytes");
-                        resolve();
-                    });
-                    archive.on('error', reject);
-                    
-                    archive.pipe(output);
-                    archive.file(trainPath, { name: 'train.csv' });
-                    archive.file(testPath, { name: 'test.csv' });
-                    archive.finalize();
-                });
-                
-                splitZipPath = `/uploads/${path.basename(splitDir)}/${zipFileName}`;
-                console.log("ZIP path for frontend:", splitZipPath);
-            } catch (zipError) {
-                console.error("Error creating ZIP:", zipError);
-            }
-        } else {
-            console.log("Train/Test paths not available, skipping ZIP creation");
-        }
         
         res.json({
             ...response.data,
