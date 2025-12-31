@@ -16,6 +16,7 @@ import {
   FileCheck,
   Activity
 } from 'lucide-react';
+import AuthModal from './components/AuthModal';
 
 // API URL - uses environment variable in production, localhost in development
 const API_URL = import.meta.env.VITE_API_URL || 'http://127.0.0.1:5000';
@@ -24,6 +25,10 @@ const AutoKlean = () => {
   const [scrollY, setScrollY] = useState(0);
   const [activeTab, setActiveTab] = useState('config');
   
+  // Auth State
+  const [showAuthModal, setShowAuthModal] = useState(false);
+  const [user, setUser] = useState(null);
+
   // Data States
   const [file, setFile] = useState(null);
   const [dataset, setDataset] = useState(null);
@@ -53,6 +58,12 @@ const AutoKlean = () => {
     window.addEventListener('scroll', handleScroll, { passive: true });
     return () => window.removeEventListener('scroll', handleScroll);
   }, []);
+
+  // Handle Login
+  const handleLogin = (userData) => {
+    setUser(userData);
+    setShowAuthModal(false);
+  };
 
   // Handle File Upload
   const handleFileChange = async (e) => {
@@ -157,7 +168,24 @@ const AutoKlean = () => {
           </div>
           <div className="flex items-center gap-6">
             <button className="text-sm font-medium text-gray-400 hover:text-white transition-colors">Docs</button>
-            <button className="px-6 py-2.5 text-sm font-bold bg-white text-black rounded-full hover:bg-[#ccff00] transition-colors">Sign In</button>
+            {user ? (
+              <div className="flex items-center gap-3">
+                <span className="text-sm font-medium text-white">{user.name}</span>
+                <button 
+                  onClick={() => setUser(null)}
+                  className="px-6 py-2.5 text-sm font-bold bg-white/10 text-white rounded-full hover:bg-white/20 transition-colors"
+                >
+                  Sign Out
+                </button>
+              </div>
+            ) : (
+              <button 
+                onClick={() => setShowAuthModal(true)}
+                className="px-6 py-2.5 text-sm font-bold bg-white text-black rounded-full hover:bg-[#ccff00] transition-colors"
+              >
+                Sign In
+              </button>
+            )}
           </div>
         </div>
       </nav>
@@ -545,6 +573,12 @@ const AutoKlean = () => {
       <footer className="border-t border-white/10 py-12 text-center text-gray-500 text-sm bg-black">
         <p>AUTOKLEAN v1.0 • AUTO-CLEANING ENGINE</p>
       </footer>
+
+      <AuthModal 
+        isOpen={showAuthModal} 
+        onClose={() => setShowAuthModal(false)} 
+        onLogin={handleLogin} 
+      />
     </div>
   );
 };
