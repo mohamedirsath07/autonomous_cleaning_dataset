@@ -17,6 +17,9 @@ import {
   Activity
 } from 'lucide-react';
 
+// API URL - uses environment variable in production, localhost in development
+const API_URL = import.meta.env.VITE_API_URL || 'http://127.0.0.1:5000';
+
 const AutoKlean = () => {
   const [scrollY, setScrollY] = useState(0);
   const [activeTab, setActiveTab] = useState('config');
@@ -69,7 +72,7 @@ const AutoKlean = () => {
     formData.append('file', selectedFile);
 
     try {
-      const response = await axios.post('http://127.0.0.1:5000/api/datasets/upload', formData, {
+      const response = await axios.post(`${API_URL}/api/datasets/upload`, formData, {
         headers: { 'Content-Type': 'multipart/form-data' }
       });
       
@@ -95,7 +98,7 @@ const AutoKlean = () => {
     setPipelineResults(null);
 
     try {
-      const response = await axios.post(`http://127.0.0.1:5000/api/datasets/${dataset._id}/clean`, {
+      const response = await axios.post(`${API_URL}/api/datasets/${dataset._id}/clean`, {
         splitRatio: generateSplitData ? splitRatio : 0,
         kFolds,
         epochs,
@@ -116,13 +119,13 @@ const AutoKlean = () => {
       }
 
       if (response.data.cleanedFilePath) {
-        setCleanedFileUrl(`http://127.0.0.1:5000${response.data.cleanedFilePath}`);
+        setCleanedFileUrl(`${API_URL}${response.data.cleanedFilePath}`);
       }
 
       // Set train/test ZIP URL if available
       if (response.data.splitZipPath) {
-        console.log("Setting splitZipUrl:", `http://127.0.0.1:5000${response.data.splitZipPath}`);
-        setSplitZipUrl(`http://127.0.0.1:5000${response.data.splitZipPath}`);
+        console.log("Setting splitZipUrl:", `${API_URL}${response.data.splitZipPath}`);
+        setSplitZipUrl(`${API_URL}${response.data.splitZipPath}`);
       } else {
         console.log("No splitZipPath in response");
       }
