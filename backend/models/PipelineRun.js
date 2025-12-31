@@ -1,6 +1,7 @@
 const mongoose = require('mongoose');
 
 const pipelineRunSchema = new mongoose.Schema({
+    user_id: { type: mongoose.Schema.Types.ObjectId, ref: 'User' }, // Link to User
     dataset_id: { type: mongoose.Schema.Types.ObjectId, ref: 'Dataset', required: true },
     pipeline_config: {
         operation_type: { type: String },

@@ -14,9 +14,11 @@ import {
   BrainCircuit,
   Layers,
   FileCheck,
-  Activity
+  Activity,
+  Clock
 } from 'lucide-react';
 import AuthModal from './components/AuthModal';
+import HistoryModal from './components/HistoryModal';
 
 // API URL - uses environment variable in production, localhost in development
 const API_URL = import.meta.env.VITE_API_URL || 'http://127.0.0.1:5000';
@@ -27,6 +29,7 @@ const AutoKlean = () => {
   
   // Auth State
   const [showAuthModal, setShowAuthModal] = useState(false);
+  const [showHistoryModal, setShowHistoryModal] = useState(false);
   const [user, setUser] = useState(null);
 
   // Data States
@@ -124,6 +127,7 @@ const AutoKlean = () => {
 
     try {
       const response = await axios.post(`${API_URL}/api/datasets/${dataset._id}/clean`, {
+        userId: user ? user._id : null, // Pass user ID if logged in
         splitRatio: generateSplitData ? splitRatio : 0,
         kFolds,
         epochs,
@@ -184,6 +188,13 @@ const AutoKlean = () => {
             <button className="text-sm font-medium text-gray-400 hover:text-white transition-colors">Docs</button>
             {user ? (
               <div className="flex items-center gap-3">
+                <button 
+                  onClick={() => setShowHistoryModal(true)}
+                  className="flex items-center gap-2 text-sm font-medium text-gray-400 hover:text-[#ccff00] transition-colors mr-2"
+                >
+                  <Clock size={16} />
+                  History
+                </button>
                 <span className="text-sm font-medium text-white">{user.name}</span>
                 <button 
                   onClick={handleLogout}
@@ -592,6 +603,12 @@ const AutoKlean = () => {
         isOpen={showAuthModal} 
         onClose={() => setShowAuthModal(false)} 
         onLogin={handleLogin} 
+      />
+      
+      <HistoryModal
+        isOpen={showHistoryModal}
+        onClose={() => setShowHistoryModal(false)}
+        user={user}
       />
     </div>
   );

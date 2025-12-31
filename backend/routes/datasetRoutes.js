@@ -208,6 +208,7 @@ router.post('/:id/clean', async (req, res) => {
         
         // Save pipeline run to database
         const newRun = new PipelineRun({
+            user_id: req.body.userId || null, // Save user ID if provided
             dataset_id: dataset._id,
             pipeline_config: { 
                 splitRatio, kFolds, epochs, removeOutliers, imputeMissing, normalizeFeatures
@@ -467,6 +468,23 @@ router.post('/:id/run-pipeline', async (req, res) => {
             console.error("Python service error data:", error.response.data);
         }
         res.status(500).json({ message: error.response?.data?.detail || 'Error running pipeline' });
+    }
+});
+
+// GET /api/datasets/history/:userId - Get user's pipeline run history
+router.get('/history/:userId', async (req, res) => {
+    try {
+        const { userId } = req.params;
+        
+        // Find runs for this user, sorted by newest first
+        const runs = await PipelineRun.find({ user_id: userId })
+            .sort({ created_at: -1 })
+            .populate('dataset_id', 'name uploaded_at'); // Populate dataset details
+            
+        res.json(runs);
+    } catch (error) {
+        console.error("Error fetching history:", error);
+        res.status(500).json({ message: 'Error fetching history' });
     }
 });
 
