@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { X, Mail, Lock, User, Chrome, Loader2 } from 'lucide-react';
+import { X, Mail, Lock, User, Globe, Loader2 } from 'lucide-react';
 import { useGoogleLogin } from '@react-oauth/google';
 import axios from 'axios';
 
@@ -164,7 +164,7 @@ const AuthModal = ({ isOpen, onClose, onLogin }) => {
           onClick={() => googleLogin()}
           className="w-full bg-white text-black font-medium py-2.5 rounded-lg hover:bg-gray-100 transition-all flex items-center justify-center gap-2"
         >
-          <Chrome size={18} />
+          <Globe size={18} />
           Google
         </button>
 
