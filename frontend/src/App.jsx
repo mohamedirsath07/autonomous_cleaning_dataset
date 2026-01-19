@@ -1,24 +1,21 @@
 import React, { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
-import { 
-  Upload, 
-  Settings, 
-  Database, 
-  Zap, 
-  LayoutTemplate, 
-  GitBranch, 
-  Terminal as TerminalIcon, 
+import {
+  Upload,
+  Settings,
+  Database,
+  Zap,
+  LayoutTemplate,
+  GitBranch,
+  Terminal as TerminalIcon,
   CheckCircle,
   Download,
   BarChart,
   BrainCircuit,
   Layers,
   FileCheck,
-  Activity,
-  Clock
+  Activity
 } from 'lucide-react';
-import AuthModal from './components/AuthModal';
-import HistoryModal from './components/HistoryModal';
 
 // API URL - uses environment variable in production, localhost in development
 const API_URL = import.meta.env.VITE_API_URL || 'http://127.0.0.1:5000';
@@ -26,11 +23,6 @@ const API_URL = import.meta.env.VITE_API_URL || 'http://127.0.0.1:5000';
 const AutoKlean = () => {
   const [scrollY, setScrollY] = useState(0);
   const [activeTab, setActiveTab] = useState('config');
-  
-  // Auth State
-  const [showAuthModal, setShowAuthModal] = useState(false);
-  const [showHistoryModal, setShowHistoryModal] = useState(false);
-  const [user, setUser] = useState(null);
 
   // Data States
   const [file, setFile] = useState(null);
@@ -59,28 +51,8 @@ const AutoKlean = () => {
   useEffect(() => {
     const handleScroll = () => setScrollY(window.scrollY);
     window.addEventListener('scroll', handleScroll, { passive: true });
-    
-    // Check for saved user
-    const savedUser = localStorage.getItem('user');
-    if (savedUser) {
-      setUser(JSON.parse(savedUser));
-    }
-
     return () => window.removeEventListener('scroll', handleScroll);
   }, []);
-
-  // Handle Login
-  const handleLogin = (userData) => {
-    setUser(userData);
-    localStorage.setItem('user', JSON.stringify(userData));
-    setShowAuthModal(false);
-  };
-
-  // Handle Logout
-  const handleLogout = () => {
-    setUser(null);
-    localStorage.removeItem('user');
-  };
 
   // Handle File Upload
   const handleFileChange = async (e) => {
@@ -103,7 +75,7 @@ const AutoKlean = () => {
       const response = await axios.post(`${API_URL}/api/datasets/upload`, formData, {
         headers: { 'Content-Type': 'multipart/form-data' }
       });
-      
+
       setDataset(response.data);
       setProfile(response.data.profile);
       setLogs(prev => [...prev, "Upload complete.", "Profile generated successfully."]);
@@ -127,7 +99,6 @@ const AutoKlean = () => {
 
     try {
       const response = await axios.post(`${API_URL}/api/datasets/${dataset._id}/clean`, {
-        userId: user ? user._id : null, // Pass user ID if logged in
         splitRatio: generateSplitData ? splitRatio : 0,
         kFolds,
         epochs,
@@ -176,41 +147,17 @@ const AutoKlean = () => {
 
   return (
     <div className="bg-[#030303] text-white min-h-screen font-sans selection:bg-[#ccff00] selection:text-black overflow-x-hidden">
-      
+
       {/* Navbar */}
       <nav className={`fixed top-0 w-full z-50 px-6 py-4 transition-all duration-300 ${scrollY > 20 ? 'bg-[#030303]/90 backdrop-blur-md border-b border-white/5' : ''}`}>
         <div className="w-full max-w-[1600px] mx-auto flex justify-between items-center">
-          <div className="flex items-center gap-2 font-bold text-xl tracking-tighter cursor-pointer" onClick={() => window.scrollTo({top: 0, behavior: 'smooth'})}>
+          <div className="flex items-center gap-2 font-bold text-xl tracking-tighter cursor-pointer" onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}>
             <div className="w-4 h-4 bg-[#ccff00] rounded-sm transform rotate-45" />
             AUTOKLEAN
           </div>
           <div className="flex items-center gap-6">
             <button className="text-sm font-medium text-gray-400 hover:text-white transition-colors">Docs</button>
-            {user ? (
-              <div className="flex items-center gap-3">
-                <button 
-                  onClick={() => setShowHistoryModal(true)}
-                  className="flex items-center gap-2 text-sm font-medium text-gray-400 hover:text-[#ccff00] transition-colors mr-2"
-                >
-                  <Clock size={16} />
-                  History
-                </button>
-                <span className="text-sm font-medium text-white">{user.name}</span>
-                <button 
-                  onClick={handleLogout}
-                  className="px-6 py-2.5 text-sm font-bold bg-white/10 text-white rounded-full hover:bg-white/20 transition-colors"
-                >
-                  Sign Out
-                </button>
-              </div>
-            ) : (
-              <button 
-                onClick={() => setShowAuthModal(true)}
-                className="px-6 py-2.5 text-sm font-bold bg-white text-black rounded-full hover:bg-[#ccff00] transition-colors"
-              >
-                Sign In
-              </button>
-            )}
+            <span className="text-xs text-gray-500 font-mono">v2.0</span>
           </div>
         </div>
       </nav>
@@ -218,17 +165,17 @@ const AutoKlean = () => {
       {/* Hero Section */}
       <section className="relative pt-32 pb-20 px-6 flex flex-col items-center justify-center min-h-[90vh]">
         <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,_var(--tw-gradient-stops))] from-white/5 via-transparent to-transparent opacity-50 blur-3xl pointer-events-none" />
-        
+
         <div className="text-center max-w-6xl mx-auto space-y-8">
           <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full border border-[#ccff00]/20 bg-[#ccff00]/5 text-[#ccff00] text-xs font-mono uppercase tracking-widest mb-4">
             <Zap size={12} /> V2.0 Auto-Pipeline Engine
           </div>
-          
+
           <h1 className="text-6xl md:text-8xl lg:text-9xl font-bold tracking-tighter leading-[0.95]">
             Refine Data. <br />
             <span className="text-transparent bg-clip-text bg-gradient-to-b from-white to-gray-500">Amplify Models.</span>
           </h1>
-          
+
           <p className="text-xl text-gray-400 max-w-2xl mx-auto leading-relaxed">
             Upload raw datasets and let AutoKlean handle missing values, normalization, splits, and feature engineering instantly.
           </p>
@@ -264,7 +211,7 @@ const AutoKlean = () => {
       <section className="py-20 px-4 md:px-8 max-w-[1600px] mx-auto">
         <Reveal>
           <div className="flex flex-col md:flex-row gap-8">
-            
+
             {/* Left: Configuration Panel */}
             <div className="w-full md:w-1/3 space-y-6">
               <div className="bg-[#0a0a0a] border border-white/10 rounded-xl p-6 shadow-2xl sticky top-24">
@@ -278,10 +225,10 @@ const AutoKlean = () => {
                   <div className="flex justify-between items-center text-sm">
                     <span className="text-gray-400">Train / Test Split</span>
                     <div className="flex items-center gap-2">
-                      <input 
-                        type="number" 
-                        min="0" 
-                        max="100" 
+                      <input
+                        type="number"
+                        min="0"
+                        max="100"
                         value={splitRatio}
                         onChange={(e) => setSplitRatio(Math.max(0, Math.min(100, parseInt(e.target.value) || 0)))}
                         className="bg-white/5 border border-white/10 rounded px-2 py-1 w-16 text-center font-mono text-sm focus:outline-none focus:border-[#ccff00]"
@@ -290,15 +237,15 @@ const AutoKlean = () => {
                     </div>
                   </div>
                   <div className="relative h-2 bg-gray-800 rounded-full overflow-hidden">
-                    <div 
-                      className="absolute left-0 top-0 h-full bg-[#ccff00] transition-all" 
+                    <div
+                      className="absolute left-0 top-0 h-full bg-[#ccff00] transition-all"
                       style={{ width: `${splitRatio}%` }}
                     />
-                    <input 
-                      type="range" 
-                      min="0" 
-                      max="100" 
-                      value={splitRatio} 
+                    <input
+                      type="range"
+                      min="0"
+                      max="100"
+                      value={splitRatio}
                       onChange={(e) => setSplitRatio(parseInt(e.target.value))}
                       className="absolute inset-0 w-full opacity-0 cursor-pointer"
                     />
@@ -314,16 +261,16 @@ const AutoKlean = () => {
                   <div className="flex justify-between items-center text-sm">
                     <span className="text-gray-400">Cross Validation (K-Folds)</span>
                     <div className="flex items-center gap-2">
-                       <button onClick={() => setKFolds(Math.max(0, kFolds-1))} className="w-6 h-6 rounded bg-white/5 hover:bg-white/10 flex items-center justify-center">-</button>
-                       <input 
-                         type="number" 
-                         min="0" 
-                         max="20" 
-                         value={kFolds}
-                         onChange={(e) => setKFolds(Math.max(0, Math.min(20, parseInt(e.target.value) || 0)))}
-                         className="bg-white/5 border border-white/10 rounded px-2 py-1 w-12 text-center font-mono text-sm focus:outline-none focus:border-[#ccff00]"
-                       />
-                       <button onClick={() => setKFolds(Math.min(20, kFolds+1))} className="w-6 h-6 rounded bg-white/5 hover:bg-white/10 flex items-center justify-center">+</button>
+                      <button onClick={() => setKFolds(Math.max(0, kFolds - 1))} className="w-6 h-6 rounded bg-white/5 hover:bg-white/10 flex items-center justify-center">-</button>
+                      <input
+                        type="number"
+                        min="0"
+                        max="20"
+                        value={kFolds}
+                        onChange={(e) => setKFolds(Math.max(0, Math.min(20, parseInt(e.target.value) || 0)))}
+                        className="bg-white/5 border border-white/10 rounded px-2 py-1 w-12 text-center font-mono text-sm focus:outline-none focus:border-[#ccff00]"
+                      />
+                      <button onClick={() => setKFolds(Math.min(20, kFolds + 1))} className="w-6 h-6 rounded bg-white/5 hover:bg-white/10 flex items-center justify-center">+</button>
                     </div>
                   </div>
                 </div>
@@ -332,8 +279,8 @@ const AutoKlean = () => {
                 <div className="space-y-4 mb-8">
                   <div className="flex justify-between items-center text-sm">
                     <span className="text-gray-400">Target Epochs</span>
-                    <input 
-                      type="number" 
+                    <input
+                      type="number"
                       value={epochs}
                       onChange={(e) => setEpochs(e.target.value)}
                       className="bg-white/5 border border-white/10 rounded px-2 py-1 w-20 text-right font-mono text-sm focus:outline-none focus:border-[#ccff00]"
@@ -349,8 +296,8 @@ const AutoKlean = () => {
                     { label: 'Normalize Features', state: normalizeFeatures, setState: setNormalizeFeatures },
                     { label: 'Generate Train/Test Split', state: generateSplitData, setState: setGenerateSplitData }
                   ].map((item) => (
-                    <div 
-                      key={item.label} 
+                    <div
+                      key={item.label}
                       onClick={() => item.setState(!item.state)}
                       className={`flex items-center justify-between p-3 rounded-lg border cursor-pointer transition-colors ${item.state ? 'bg-white/5 border-[#ccff00]/30' : 'bg-transparent border-white/5 hover:border-white/20'}`}
                     >
@@ -360,7 +307,7 @@ const AutoKlean = () => {
                   ))}
                 </div>
 
-                <button 
+                <button
                   onClick={startProcessing}
                   disabled={isProcessing}
                   className={`w-full py-4 rounded-lg font-bold text-black transition-all ${isProcessing ? 'bg-gray-600 cursor-not-allowed' : 'bg-[#ccff00] hover:bg-[#b3e600] hover:scale-[1.02]'}`}
@@ -372,16 +319,16 @@ const AutoKlean = () => {
 
             {/* Right: Visualization & Output */}
             <div className="w-full md:w-2/3 space-y-6">
-              
+
               {/* Tab Navigation */}
               <div className="flex gap-4 border-b border-white/10 pb-1">
-                <button 
+                <button
                   onClick={() => setActiveTab('config')}
                   className={`pb-3 text-sm font-medium transition-colors border-b-2 ${activeTab === 'config' ? 'border-[#ccff00] text-white' : 'border-transparent text-gray-500 hover:text-white'}`}
                 >
                   Dataset Overview
                 </button>
-                <button 
+                <button
                   onClick={() => setActiveTab('features')}
                   className={`pb-3 text-sm font-medium transition-colors border-b-2 ${activeTab === 'features' ? 'border-[#ccff00] text-white' : 'border-transparent text-gray-500 hover:text-white'}`}
                 >
@@ -408,14 +355,14 @@ const AutoKlean = () => {
                   <div className="col-span-1 bg-[#0a0a0a] border border-white/10 p-4 rounded-xl">
                     <div className="text-gray-500 text-xs uppercase font-mono mb-1">Missing</div>
                     <div className="text-2xl font-bold text-white">
-                      {profile?.missing_values ? 
-                        ((Object.values(profile.missing_values).reduce((a, b) => a + b, 0) / (profile.shape[0] * profile.shape[1]) * 100).toFixed(1)) 
+                      {profile?.missing_values ?
+                        ((Object.values(profile.missing_values).reduce((a, b) => a + b, 0) / (profile.shape[0] * profile.shape[1]) * 100).toFixed(1))
                         : '0'}%
                     </div>
                     <div className="w-full bg-gray-800 h-1 mt-3 rounded-full overflow-hidden">
-                      <div 
-                        className="bg-red-500 h-full" 
-                        style={{ width: `${profile?.missing_values ? ((Object.values(profile.missing_values).reduce((a, b) => a + b, 0) / (profile.shape[0] * profile.shape[1]) * 100)) : 0}%` }} 
+                      <div
+                        className="bg-red-500 h-full"
+                        style={{ width: `${profile?.missing_values ? ((Object.values(profile.missing_values).reduce((a, b) => a + b, 0) / (profile.shape[0] * profile.shape[1]) * 100)) : 0}%` }}
                       />
                     </div>
                   </div>
@@ -429,15 +376,15 @@ const AutoKlean = () => {
                   {/* Feature Distribution Graph Mockup */}
                   <div className="col-span-2 md:col-span-4 bg-[#0a0a0a] border border-white/10 p-6 rounded-xl h-48 flex flex-col justify-between">
                     <div className="flex justify-between items-center">
-                       <span className="text-sm font-bold">Feature Distribution (Target Variable)</span>
-                       <BarChart size={16} className="text-gray-500" />
+                      <span className="text-sm font-bold">Feature Distribution (Target Variable)</span>
+                      <BarChart size={16} className="text-gray-500" />
                     </div>
                     <div className="flex items-end gap-2 h-24 w-full">
                       {[40, 65, 45, 90, 30, 60, 55, 80, 50, 75, 40, 95, 60, 45, 70, 85].map((h, i) => (
-                        <div 
-                          key={i} 
+                        <div
+                          key={i}
                           className="flex-1 bg-white/10 hover:bg-[#ccff00] transition-all duration-300 rounded-t-sm"
-                          style={{ height: `${h}%` }} 
+                          style={{ height: `${h}%` }}
                         />
                       ))}
                     </div>
@@ -455,7 +402,7 @@ const AutoKlean = () => {
                     </div>
                     <span className="text-[10px] bg-emerald-500/20 text-emerald-400 px-2 py-1 rounded-full uppercase tracking-wider">Success</span>
                   </div>
-                  
+
                   {/* Results Grid - Extended */}
                   <div className="grid grid-cols-3 md:grid-cols-6 gap-2 mb-4">
                     <div className="bg-black/40 rounded-lg p-3 border border-white/5">
@@ -468,7 +415,7 @@ const AutoKlean = () => {
                       <div className="flex items-center gap-1 text-[9px] text-gray-500 uppercase tracking-wider mb-1">
                         <FileCheck size={10} />Test
                       </div>
-                      <div className="text-base font-bold text-blue-400">{100-splitRatio}%</div>
+                      <div className="text-base font-bold text-blue-400">{100 - splitRatio}%</div>
                     </div>
                     <div className="bg-black/40 rounded-lg p-3 border border-white/5">
                       <div className="flex items-center gap-1 text-[9px] text-gray-500 uppercase tracking-wider mb-1">
@@ -516,7 +463,7 @@ const AutoKlean = () => {
                   <div className="space-y-3">
                     {/* Main Cleaned Dataset */}
                     {cleanedFileUrl && (
-                      <a 
+                      <a
                         href={cleanedFileUrl}
                         download
                         className="flex items-center justify-center gap-3 w-full py-4 bg-[#ccff00] text-black rounded-lg hover:bg-[#b3e600] transition-all font-bold text-sm uppercase tracking-wider hover:scale-[1.02] shadow-lg shadow-[#ccff00]/20"
@@ -527,12 +474,12 @@ const AutoKlean = () => {
 
                     {/* Train/Test Split ZIP Download */}
                     {splitZipUrl && (
-                      <a 
+                      <a
                         href={splitZipUrl}
                         download="train_test_split.zip"
                         className="flex items-center justify-center gap-2 w-full py-3 bg-gradient-to-r from-emerald-500/20 to-blue-500/20 text-white border border-white/10 rounded-lg hover:from-emerald-500/30 hover:to-blue-500/30 transition-all font-bold text-xs uppercase tracking-wider"
                       >
-                        <Download size={14} /> Download Train/Test Split (ZIP) • {splitRatio}% / {100-splitRatio}%
+                        <Download size={14} /> Download Train/Test Split (ZIP) • {splitRatio}% / {100 - splitRatio}%
                       </a>
                     )}
                   </div>
@@ -596,20 +543,8 @@ const AutoKlean = () => {
 
       {/* Footer */}
       <footer className="border-t border-white/10 py-12 text-center text-gray-500 text-sm bg-black">
-        <p>AUTOKLEAN v1.0 • AUTO-CLEANING ENGINE</p>
+        <p>AUTOKLEAN v2.0 • AUTO-CLEANING ENGINE</p>
       </footer>
-
-      <AuthModal 
-        isOpen={showAuthModal} 
-        onClose={() => setShowAuthModal(false)} 
-        onLogin={handleLogin} 
-      />
-      
-      <HistoryModal
-        isOpen={showHistoryModal}
-        onClose={() => setShowHistoryModal(false)}
-        user={user}
-      />
     </div>
   );
 };

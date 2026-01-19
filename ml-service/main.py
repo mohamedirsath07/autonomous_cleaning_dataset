@@ -1137,21 +1137,26 @@ async def auto_clean_dataset(request: AutoCleanRequest):
                         df[col].fillna(mode_val, inplace=True)
                         transformation_log.append(f"Imputed {col} with mode: {mode_val}")
         
-        # 2. Remove outliers (using IQR for numeric columns)
+        # 2. Handle outliers (using IQR clipping for numeric columns)
+        # Note: We clip values instead of removing rows to preserve data integrity
         if request.remove_outliers:
-            outliers_removed = 0
+            outliers_clipped = 0
             numeric_cols = df.select_dtypes(include=[np.number]).columns
             for col in numeric_cols:
                 Q1 = df[col].quantile(0.25)
                 Q3 = df[col].quantile(0.75)
                 IQR = Q3 - Q1
+                if IQR == 0 or not np.isfinite(IQR):
+                    continue  # Skip columns with no variance
                 lower_bound = Q1 - 1.5 * IQR
                 upper_bound = Q3 + 1.5 * IQR
-                before_rows = len(df)
-                df = df[(df[col] >= lower_bound) & (df[col] <= upper_bound)]
-                outliers_removed += before_rows - len(df)
-            if outliers_removed > 0:
-                transformation_log.append(f"Removed {outliers_removed} outlier rows using IQR method")
+                # Count outliers before clipping
+                outlier_mask = (df[col] < lower_bound) | (df[col] > upper_bound)
+                outliers_clipped += outlier_mask.sum()
+                # Clip values instead of removing rows
+                df[col] = df[col].clip(lower=lower_bound, upper=upper_bound)
+            if outliers_clipped > 0:
+                transformation_log.append(f"Clipped {outliers_clipped} outlier values using IQR method")
         
         # 3. Normalize features (MinMax scaling for numeric columns)
         if request.normalize_features:
@@ -1179,7 +1184,12 @@ async def auto_clean_dataset(request: AutoCleanRequest):
         # 4. Train/Test Split
         train_path = None
         test_path = None
-        if request.split_ratio:
+        
+        # Safety check: ensure we have enough rows for splitting
+        if len(df) < 2:
+            raise HTTPException(status_code=400, detail="Dataset has too few rows after processing. Please check your data quality or disable some cleaning options.")
+        
+        if request.split_ratio and request.split_ratio > 0:
             try:
                 train_size = request.split_ratio / 100.0
                 # Ensure valid range
