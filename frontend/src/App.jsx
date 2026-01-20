@@ -200,7 +200,7 @@ const AutoKlean = () => {
 
             <div className="bg-yellow-500/10 border border-yellow-500/20 rounded-lg p-3 mb-6">
               <p className="text-xs text-yellow-400/90">
-                <strong>Recommended:</strong> For best results on the free tier, use datasets under 50MB (~50,000 rows). Larger files may timeout or fail.
+                <strong>Note:</strong> Files larger than 50MB will generally work, but datasets with many rows will be automatically truncated to the first 20,000 rows to prevent errors on the free tier.
               </p>
             </div>
 

@@ -1108,8 +1108,8 @@ def generate_pipeline_code(file_path: str, actions: Dict[str, Any], manual_steps
 # ========== AUTOKLEAN AUTO-CLEAN ENDPOINT ==========
 
 # Memory optimization settings
-MAX_ROWS_FREE_TIER = 50000  # Maximum rows to process on free tier to avoid OOM
-CHUNK_SIZE = 10000  # Process CSV in chunks of 10k rows
+MAX_ROWS_FREE_TIER = 20000  # Conservative limit for free tier to prevent 500 errors/timeout
+CHUNK_SIZE = 5000   # Process smaller chunks
 
 class AutoCleanRequest(BaseModel):
     file_path: str
