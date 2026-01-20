@@ -50,7 +50,7 @@ const AutoKlean = () => {
   // Large file warning state
   const [showLargeFileWarning, setShowLargeFileWarning] = useState(false);
   const [pendingFile, setPendingFile] = useState(null);
-  const MAX_FILE_SIZE_MB = 5; // 5MB warning threshold
+  const MAX_FILE_SIZE_MB = 50; // 50MB warning threshold (Render free tier has 512MB RAM)
 
   // Handle Scroll
   useEffect(() => {
