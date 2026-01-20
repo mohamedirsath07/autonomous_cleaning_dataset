@@ -47,6 +47,11 @@ const AutoKlean = () => {
   const [logs, setLogs] = useState([]);
   const [pipelineResults, setPipelineResults] = useState(null);
 
+  // Large file warning state
+  const [showLargeFileWarning, setShowLargeFileWarning] = useState(false);
+  const [pendingFile, setPendingFile] = useState(null);
+  const MAX_FILE_SIZE_MB = 5; // 5MB warning threshold
+
   // Handle Scroll
   useEffect(() => {
     const handleScroll = () => setScrollY(window.scrollY);
@@ -59,12 +64,27 @@ const AutoKlean = () => {
     const selectedFile = e.target.files?.[0];
     if (!selectedFile) return;
 
+    // Check file size and show warning for large files
+    const fileSizeMB = selectedFile.size / (1024 * 1024);
+    if (fileSizeMB > MAX_FILE_SIZE_MB) {
+      setPendingFile(selectedFile);
+      setShowLargeFileWarning(true);
+      return;
+    }
+
+    await processFileUpload(selectedFile);
+  };
+
+  // Process the file upload (called directly or after warning confirmation)
+  const processFileUpload = async (selectedFile) => {
     setFile(selectedFile);
     setDataset(null);
     setProfile(null);
     setCleanedFileUrl(null);
     setSplitZipUrl(null);
     setPipelineResults(null);
+    setShowLargeFileWarning(false);
+    setPendingFile(null);
     setLogs(["Uploading and profiling dataset..."]);
     setIsProcessing(true);
 
@@ -85,6 +105,19 @@ const AutoKlean = () => {
     } finally {
       setIsProcessing(false);
     }
+  };
+
+  // Handle large file warning confirmation
+  const handleLargeFileConfirm = () => {
+    if (pendingFile) {
+      processFileUpload(pendingFile);
+    }
+  };
+
+  // Handle large file warning cancellation
+  const handleLargeFileCancel = () => {
+    setShowLargeFileWarning(false);
+    setPendingFile(null);
   };
 
   // Run Pipeline
@@ -147,6 +180,47 @@ const AutoKlean = () => {
 
   return (
     <div className="bg-[#030303] text-white min-h-screen font-sans selection:bg-[#ccff00] selection:text-black overflow-x-hidden">
+
+      {/* Large File Warning Modal */}
+      {showLargeFileWarning && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-[100] flex items-center justify-center p-4">
+          <div className="bg-[#0a0a0a] border border-yellow-500/30 rounded-2xl p-6 max-w-md w-full shadow-2xl">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-10 h-10 bg-yellow-500/20 rounded-full flex items-center justify-center">
+                <svg className="w-5 h-5 text-yellow-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                </svg>
+              </div>
+              <h3 className="text-lg font-bold text-yellow-500">Large File Detected</h3>
+            </div>
+
+            <p className="text-gray-300 text-sm mb-4">
+              This file is <span className="text-white font-semibold">{pendingFile ? (pendingFile.size / (1024 * 1024)).toFixed(1) : 0} MB</span>, which may cause issues on the free hosting tier due to memory limitations.
+            </p>
+
+            <div className="bg-yellow-500/10 border border-yellow-500/20 rounded-lg p-3 mb-6">
+              <p className="text-xs text-yellow-400/90">
+                <strong>Recommended:</strong> For best results on the free tier, use datasets under 5MB (~20,000 rows). Larger files may timeout or fail.
+              </p>
+            </div>
+
+            <div className="flex gap-3">
+              <button
+                onClick={handleLargeFileCancel}
+                className="flex-1 py-3 px-4 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg text-sm font-medium transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleLargeFileConfirm}
+                className="flex-1 py-3 px-4 bg-yellow-500 hover:bg-yellow-400 text-black rounded-lg text-sm font-bold transition-colors"
+              >
+                Proceed Anyway
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Navbar */}
       <nav className={`fixed top-0 w-full z-50 px-6 py-4 transition-all duration-300 ${scrollY > 20 ? 'bg-[#030303]/90 backdrop-blur-md border-b border-white/5' : ''}`}>

@@ -1107,6 +1107,10 @@ def generate_pipeline_code(file_path: str, actions: Dict[str, Any], manual_steps
 
 # ========== AUTOKLEAN AUTO-CLEAN ENDPOINT ==========
 
+# Memory optimization settings
+MAX_ROWS_FREE_TIER = 50000  # Maximum rows to process on free tier to avoid OOM
+CHUNK_SIZE = 10000  # Process CSV in chunks of 10k rows
+
 class AutoCleanRequest(BaseModel):
     file_path: str
     split_ratio: Optional[float] = 0.8
@@ -1115,6 +1119,48 @@ class AutoCleanRequest(BaseModel):
     remove_outliers: Optional[bool] = True
     impute_missing: Optional[bool] = True
     normalize_features: Optional[bool] = True
+
+
+def load_dataframe_memory_efficient(file_path: str, original_path: str) -> Tuple[pd.DataFrame, List[str]]:
+    """Load dataframe with memory optimization for large files."""
+    import gc
+    warnings = []
+    
+    if file_path.endswith('.csv') or original_path.endswith('.csv'):
+        # First, count rows to check if we need to limit
+        row_count = sum(1 for _ in open(file_path, 'r', encoding='utf-8', errors='ignore')) - 1  # subtract header
+        logger.info(f"File has approximately {row_count} rows")
+        
+        if row_count > MAX_ROWS_FREE_TIER:
+            warnings.append(f"Large file detected ({row_count} rows). Loading first {MAX_ROWS_FREE_TIER} rows to prevent memory issues.")
+            logger.warning(f"Limiting rows from {row_count} to {MAX_ROWS_FREE_TIER}")
+            df = pd.read_csv(file_path, nrows=MAX_ROWS_FREE_TIER, low_memory=True)
+        else:
+            # Use chunked reading for better memory efficiency
+            chunks = []
+            for chunk in pd.read_csv(file_path, chunksize=CHUNK_SIZE, low_memory=True):
+                chunks.append(chunk)
+            df = pd.concat(chunks, ignore_index=True)
+            del chunks
+            gc.collect()
+    elif file_path.endswith('.xlsx') or file_path.endswith('.xls') or original_path.endswith('.xlsx') or original_path.endswith('.xls'):
+        df = pd.read_excel(file_path)
+        if len(df) > MAX_ROWS_FREE_TIER:
+            warnings.append(f"Large file detected ({len(df)} rows). Using first {MAX_ROWS_FREE_TIER} rows to prevent memory issues.")
+            df = df.head(MAX_ROWS_FREE_TIER)
+    else:
+        raise HTTPException(status_code=400, detail="Unsupported file format")
+    
+    # Optimize memory usage by downcasting numeric types
+    for col in df.select_dtypes(include=['float64']).columns:
+        df[col] = pd.to_numeric(df[col], downcast='float')
+    for col in df.select_dtypes(include=['int64']).columns:
+        df[col] = pd.to_numeric(df[col], downcast='integer')
+    
+    gc.collect()
+    logger.info(f"Loaded dataframe with {len(df)} rows, {len(df.columns)} columns")
+    
+    return df, warnings
 
 
 @app.post("/auto-clean")
@@ -1126,6 +1172,8 @@ async def auto_clean_dataset(request: AutoCleanRequest):
     - Normalize features using MinMax scaler
     - Split data for train/test
     """
+    import gc
+    
     logger.info(f"Auto-clean request received: file_path={request.file_path}")
     logger.info(f"Options: split_ratio={request.split_ratio}, remove_outliers={request.remove_outliers}, impute_missing={request.impute_missing}, normalize_features={request.normalize_features}")
     
@@ -1134,15 +1182,12 @@ async def auto_clean_dataset(request: AutoCleanRequest):
     logger.info(f"File path after URL check: {file_path}")
     
     try:
-        # Load Data
-        if file_path.endswith('.csv') or original_path.endswith('.csv'):
-            df = pd.read_csv(file_path)
-        elif file_path.endswith('.xlsx') or file_path.endswith('.xls') or original_path.endswith('.xlsx') or original_path.endswith('.xls'):
-            df = pd.read_excel(file_path)
-        else:
-            raise HTTPException(status_code=400, detail="Unsupported file format")
+        # Load Data with memory optimization
+        df, load_warnings = load_dataframe_memory_efficient(file_path, original_path)
         
         transformation_log = []
+        # Add any load warnings (e.g., file truncation)
+        transformation_log.extend(load_warnings)
         original_rows = len(df)
         original_cols = len(df.columns)
         transformation_log.append(f"Loaded dataset: {original_rows} rows, {original_cols} columns")
