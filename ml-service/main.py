@@ -36,21 +36,28 @@ app.add_middleware(
 def download_file_if_url(file_path: str) -> str:
     """Download file from URL if it's a URL, otherwise return path as-is."""
     if file_path.startswith('http://') or file_path.startswith('https://'):
-        response = requests.get(file_path)
-        response.raise_for_status()
-        
-        # Determine extension
-        ext = '.csv'
-        if '.xlsx' in file_path:
-            ext = '.xlsx'
-        elif '.xls' in file_path:
-            ext = '.xls'
-        
-        # Save to temp file
-        temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=ext)
-        temp_file.write(response.content)
-        temp_file.close()
-        return temp_file.name
+        logger.info(f"Downloading file from URL: {file_path}")
+        try:
+            response = requests.get(file_path, timeout=30)
+            response.raise_for_status()
+            logger.info(f"Downloaded {len(response.content)} bytes")
+            
+            # Determine extension
+            ext = '.csv'
+            if '.xlsx' in file_path:
+                ext = '.xlsx'
+            elif '.xls' in file_path:
+                ext = '.xls'
+            
+            # Save to temp file
+            temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=ext)
+            temp_file.write(response.content)
+            temp_file.close()
+            logger.info(f"Saved to temp file: {temp_file.name}")
+            return temp_file.name
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Failed to download file from URL: {e}")
+            raise HTTPException(status_code=400, detail=f"Failed to download file: {str(e)}")
     return file_path
 
 @app.get("/health")
@@ -661,8 +668,10 @@ def run_full_pipeline(df: pd.DataFrame) -> Tuple[pd.DataFrame, List[str], Dict[s
 
 @app.post("/profile")
 async def generate_profile(request: ProfileRequest):
+    logger.info(f"Profile request received: file_path={request.file_path}")
     original_path = request.file_path
     file_path = download_file_if_url(original_path)
+    logger.info(f"File path after URL check: {file_path}")
     
     try:
         # Read the file
@@ -672,6 +681,8 @@ async def generate_profile(request: ProfileRequest):
             df = pd.read_excel(file_path)
         else:
             raise HTTPException(status_code=400, detail="Unsupported file format")
+        
+        logger.info(f"Loaded dataframe: {len(df)} rows, {len(df.columns)} columns")
         
         # Replace NaN with None for JSON serialization
         df_replace = df.replace({np.nan: None})
@@ -758,11 +769,12 @@ async def generate_profile(request: ProfileRequest):
                     col_profile["suggested"].append("encode")
             
             profile["columns"].append(col_profile)
-            
+        
+        logger.info(f"Profile generated successfully: {len(profile['columns'])} columns profiled")
         return profile
 
     except Exception as e:
-        print(f"Error processing file: {e}")
+        logger.error(f"Error processing file: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/prepare")
