@@ -1,4 +1,5 @@
 from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import pandas as pd
 import numpy as np
@@ -15,8 +16,22 @@ import re
 import os
 import requests
 import tempfile
+import logging
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 app = FastAPI()
+
+# Add CORS middleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 def download_file_if_url(file_path: str) -> str:
     """Download file from URL if it's a URL, otherwise return path as-is."""
@@ -105,7 +120,7 @@ def _convert_numeric(series: pd.Series) -> Tuple[pd.Series, bool]:
 
 def _convert_datetime(series: pd.Series) -> Tuple[pd.Series, bool]:
     try:
-        parsed = pd.to_datetime(series, errors="coerce", infer_datetime_format=True)
+        parsed = pd.to_datetime(series, errors="coerce")
         ratio = parsed.notna().mean() if len(series) else 0
         if ratio >= 0.6:
             return parsed, True
@@ -905,7 +920,7 @@ def generate_pipeline_code(file_path: str, actions: Dict[str, Any], manual_steps
             code_lines.append(f"df['{col}'] = pd.to_numeric(df['{col}'], errors='coerce')")
         elif target == "datetime":
             code_lines.append(
-                f"df['{col}'] = pd.to_datetime(df['{col}'], errors='coerce', infer_datetime_format=True)"
+                f"df['{col}'] = pd.to_datetime(df['{col}'], errors='coerce')"
             )
         elif target == "boolean":
             code_lines.append(
@@ -1099,8 +1114,12 @@ async def auto_clean_dataset(request: AutoCleanRequest):
     - Normalize features using MinMax scaler
     - Split data for train/test
     """
+    logger.info(f"Auto-clean request received: file_path={request.file_path}")
+    logger.info(f"Options: split_ratio={request.split_ratio}, remove_outliers={request.remove_outliers}, impute_missing={request.impute_missing}, normalize_features={request.normalize_features}")
+    
     original_path = request.file_path
     file_path = download_file_if_url(original_path)
+    logger.info(f"File path after URL check: {file_path}")
     
     try:
         # Load Data
@@ -1129,12 +1148,14 @@ async def auto_clean_dataset(request: AutoCleanRequest):
                     if pd.api.types.is_numeric_dtype(df[col]):
                         # Use median for numeric
                         median_val = df[col].median()
-                        df[col].fillna(median_val, inplace=True)
-                        transformation_log.append(f"Imputed {col} with median: {median_val:.2f}")
+                        if pd.notna(median_val):
+                            df[col] = df[col].fillna(median_val)
+                            transformation_log.append(f"Imputed {col} with median: {median_val:.2f}")
                     else:
                         # Use mode for categorical
-                        mode_val = df[col].mode()[0] if not df[col].mode().empty else "unknown"
-                        df[col].fillna(mode_val, inplace=True)
+                        mode_series = df[col].mode()
+                        mode_val = mode_series.iloc[0] if len(mode_series) > 0 else "unknown"
+                        df[col] = df[col].fillna(mode_val)
                         transformation_log.append(f"Imputed {col} with mode: {mode_val}")
         
         # 2. Handle outliers (using IQR clipping for numeric columns)
@@ -1296,9 +1317,7 @@ df.to_csv('cleaned_dataset.csv', index=False)
         }
     
     except Exception as e:
-        print(f"Error in auto-clean: {e}")
-        import traceback
-        traceback.print_exc()
+        logger.error(f"Error in auto-clean: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 
