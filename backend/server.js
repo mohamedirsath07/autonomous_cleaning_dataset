@@ -74,10 +74,13 @@ app.post('/api/datasets/upload', upload.single('file'), async (req, res) => {
         const pythonServiceUrl = process.env.PYTHON_SERVICE_URL || 'http://localhost:8000';
         const backendUrl = process.env.BACKEND_URL || `http://localhost:${PORT}`;
         const fileUrl = `${backendUrl}/uploads/${path.basename(dataset.file_path)}`;
-        
+
         try {
+            // Longer timeout for ML service cold start on free tier
             const profileResponse = await axios.post(`${pythonServiceUrl}/profile`, {
                 file_path: fileUrl
+            }, {
+                timeout: 60000 // 60 seconds for cold start + profiling
             });
 
             // Return dataset with profile info
@@ -122,7 +125,7 @@ app.post('/api/datasets/:id/clean', async (req, res) => {
             return res.status(404).json({ message: 'Dataset not found' });
         }
 
-        const { 
+        const {
             splitRatio = 0.8,
             kFolds = 5,
             epochs = 100,
@@ -134,11 +137,12 @@ app.post('/api/datasets/:id/clean', async (req, res) => {
         const pythonServiceUrl = process.env.PYTHON_SERVICE_URL || 'http://localhost:8000';
         const backendUrl = process.env.BACKEND_URL || `http://localhost:${PORT}`;
         const fileUrl = `${backendUrl}/uploads/${path.basename(dataset.file_path)}`;
-        
+
         console.log("Sending auto-clean request to Python service with config:", {
             splitRatio, kFolds, epochs, removeOutliers, imputeMissing, normalizeFeatures
         });
 
+        // Use longer timeout for ML service (cold start can take 30-60 seconds on free tier)
         const response = await axios.post(`${pythonServiceUrl}/auto-clean`, {
             file_path: fileUrl,
             split_ratio: splitRatio,
@@ -147,26 +151,31 @@ app.post('/api/datasets/:id/clean', async (req, res) => {
             remove_outliers: removeOutliers,
             impute_missing: imputeMissing,
             normalize_features: normalizeFeatures
+        }, {
+            timeout: 120000, // 2 minutes timeout for cold start + processing
+            headers: {
+                'Content-Type': 'application/json'
+            }
         });
 
         console.log("Received response from Python service (auto-clean)");
-        
+
         // Save cleaned file from base64 content
         let cleanedFilePath = null;
         let downloadPath = null;
-        
+
         if (response.data.cleaned_csv_content) {
             try {
                 const timestamp = Date.now();
                 const cleanedFileName = `autoklean_${timestamp}.csv`;
-                
+
                 // Ensure uploads directory exists
                 if (!fs.existsSync(uploadsDir)) {
                     fs.mkdirSync(uploadsDir, { recursive: true });
                 }
-                
+
                 cleanedFilePath = path.join(uploadsDir, cleanedFileName);
-                
+
                 const cleanedData = Buffer.from(response.data.cleaned_csv_content, 'base64');
                 fs.writeFileSync(cleanedFilePath, cleanedData);
                 downloadPath = `/uploads/${cleanedFileName}`;
@@ -175,53 +184,53 @@ app.post('/api/datasets/:id/clean', async (req, res) => {
                 console.error("Error saving cleaned file:", saveError);
             }
         }
-        
+
         // Save train/test files if provided
         let splitZipPath = null;
-        
+
         if (response.data.train_csv_content && response.data.test_csv_content) {
             const timestamp = Date.now();
             const splitDir = path.join(uploadsDir, `${timestamp}_split`);
             fs.mkdirSync(splitDir, { recursive: true });
-            
+
             const trainFilePath = path.join(splitDir, 'train.csv');
             const testFilePath = path.join(splitDir, 'test.csv');
-            
+
             const trainData = Buffer.from(response.data.train_csv_content, 'base64');
             const testData = Buffer.from(response.data.test_csv_content, 'base64');
-            
+
             fs.writeFileSync(trainFilePath, trainData);
             fs.writeFileSync(testFilePath, testData);
-            
+
             console.log("Saved train/test files to:", splitDir);
-            
+
             // Create ZIP file
             const zipFileName = `autoklean_train_test_${timestamp}.zip`;
             const zipFilePath = path.join(splitDir, zipFileName);
-            
+
             try {
                 await new Promise((resolve, reject) => {
                     const output = fs.createWriteStream(zipFilePath);
                     const archive = archiver('zip', { zlib: { level: 9 } });
-                    
+
                     output.on('close', () => {
                         console.log("ZIP created successfully");
                         resolve();
                     });
                     archive.on('error', reject);
-                    
+
                     archive.pipe(output);
                     archive.file(trainFilePath, { name: 'train.csv' });
                     archive.file(testFilePath, { name: 'test.csv' });
                     archive.finalize();
                 });
-                
+
                 splitZipPath = `/uploads/${timestamp}_split/${zipFileName}`;
             } catch (zipError) {
                 console.error("Error creating ZIP:", zipError);
             }
         }
-        
+
         res.json({
             ...response.data,
             cleanedFilePath: downloadPath,
