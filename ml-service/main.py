@@ -1126,41 +1126,39 @@ def load_dataframe_memory_efficient(file_path: str, original_path: str) -> Tuple
     import gc
     warnings = []
     
-    if file_path.endswith('.csv') or original_path.endswith('.csv'):
-        # First, count rows to check if we need to limit
-        row_count = sum(1 for _ in open(file_path, 'r', encoding='utf-8', errors='ignore')) - 1  # subtract header
-        logger.info(f"File has approximately {row_count} rows")
-        
-        if row_count > MAX_ROWS_FREE_TIER:
-            warnings.append(f"Large file detected ({row_count} rows). Loading first {MAX_ROWS_FREE_TIER} rows to prevent memory issues.")
-            logger.warning(f"Limiting rows from {row_count} to {MAX_ROWS_FREE_TIER}")
+    try:
+        if file_path.endswith('.csv') or original_path.endswith('.csv'):
+            # Direct read with nrows limit - simpler and more robust
             df = pd.read_csv(file_path, nrows=MAX_ROWS_FREE_TIER, low_memory=True)
+            logger.info(f"Loaded CSV with {len(df)} rows")
+            
+            # Check if we hit the limit (file might have more rows)
+            if len(df) >= MAX_ROWS_FREE_TIER:
+                warnings.append(f"Large file detected. Using first {MAX_ROWS_FREE_TIER} rows to ensure successful processing.")
+                
+        elif file_path.endswith('.xlsx') or file_path.endswith('.xls') or original_path.endswith('.xlsx') or original_path.endswith('.xls'):
+            df = pd.read_excel(file_path, nrows=MAX_ROWS_FREE_TIER)
+            logger.info(f"Loaded Excel with {len(df)} rows")
+            
+            if len(df) >= MAX_ROWS_FREE_TIER:
+                warnings.append(f"Large file detected. Using first {MAX_ROWS_FREE_TIER} rows to ensure successful processing.")
         else:
-            # Use chunked reading for better memory efficiency
-            chunks = []
-            for chunk in pd.read_csv(file_path, chunksize=CHUNK_SIZE, low_memory=True):
-                chunks.append(chunk)
-            df = pd.concat(chunks, ignore_index=True)
-            del chunks
-            gc.collect()
-    elif file_path.endswith('.xlsx') or file_path.endswith('.xls') or original_path.endswith('.xlsx') or original_path.endswith('.xls'):
-        df = pd.read_excel(file_path)
-        if len(df) > MAX_ROWS_FREE_TIER:
-            warnings.append(f"Large file detected ({len(df)} rows). Using first {MAX_ROWS_FREE_TIER} rows to prevent memory issues.")
-            df = df.head(MAX_ROWS_FREE_TIER)
-    else:
-        raise HTTPException(status_code=400, detail="Unsupported file format")
-    
-    # Optimize memory usage by downcasting numeric types
-    for col in df.select_dtypes(include=['float64']).columns:
-        df[col] = pd.to_numeric(df[col], downcast='float')
-    for col in df.select_dtypes(include=['int64']).columns:
-        df[col] = pd.to_numeric(df[col], downcast='integer')
-    
-    gc.collect()
-    logger.info(f"Loaded dataframe with {len(df)} rows, {len(df.columns)} columns")
-    
-    return df, warnings
+            raise HTTPException(status_code=400, detail="Unsupported file format")
+        
+        # Optimize memory usage by downcasting numeric types
+        for col in df.select_dtypes(include=['float64']).columns:
+            df[col] = pd.to_numeric(df[col], downcast='float')
+        for col in df.select_dtypes(include=['int64']).columns:
+            df[col] = pd.to_numeric(df[col], downcast='integer')
+        
+        gc.collect()
+        logger.info(f"Loaded dataframe with {len(df)} rows, {len(df.columns)} columns")
+        
+        return df, warnings
+        
+    except Exception as e:
+        logger.error(f"Error loading dataframe: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to load file: {str(e)}")
 
 
 @app.post("/auto-clean")
@@ -1192,9 +1190,14 @@ async def auto_clean_dataset(request: AutoCleanRequest):
         original_cols = len(df.columns)
         transformation_log.append(f"Loaded dataset: {original_rows} rows, {original_cols} columns")
         
-        # Run the standard pipeline first
-        df, auto_log, layer_actions = run_full_pipeline(df)
-        transformation_log.extend(auto_log)
+        # Run the standard pipeline first (with error handling)
+        try:
+            df, auto_log, layer_actions = run_full_pipeline(df)
+            transformation_log.extend(auto_log)
+        except Exception as pipeline_error:
+            logger.warning(f"Pipeline error (continuing with basic cleaning): {pipeline_error}")
+            transformation_log.append(f"Note: Advanced pipeline skipped due to error. Using basic cleaning.")
+            layer_actions = {}
         
         # Additional processing based on AutoKlean config
         
