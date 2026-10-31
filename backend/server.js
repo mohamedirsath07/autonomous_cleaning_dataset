@@ -19,6 +19,17 @@ if (!fs.existsSync(uploadsDir)) {
 
 const app = express();
 const PORT = process.env.PORT || 5000;
+const MAX_UPLOAD_SIZE_BYTES = (() => {
+    const raw = process.env.MAX_UPLOAD_SIZE || '50mb';
+    const match = raw.toLowerCase().match(/^([0-9]+)(mb|kb|b)?$/);
+    if (!match) return 50 * 1024 * 1024;
+    const value = Number.parseInt(match[1], 10);
+    const unit = match[2] || 'b';
+    if (unit === 'kb') return value * 1024;
+    if (unit === 'mb') return value * 1024 * 1024;
+    return value;
+})();
+const ALLOWED_EXTENSIONS = new Set(['.csv', '.xlsx', '.xls']);
 
 // Middleware
 app.use(cors({
@@ -31,13 +42,27 @@ app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 // Configure Multer for file upload
 const storage = multer.diskStorage({
     destination: (req, file, cb) => {
-        cb(null, 'uploads/');
+        cb(null, uploadsDir);
     },
     filename: (req, file, cb) => {
-        cb(null, Date.now() + '-' + file.originalname);
+        const extension = path.extname(file.originalname).toLowerCase();
+        const safeBaseName = path.basename(file.originalname, extension)
+            .replace(/[^a-zA-Z0-9_-]/g, '_')
+            .slice(0, 80) || 'dataset';
+        cb(null, `${Date.now()}-${safeBaseName}${extension}`);
     }
 });
-const upload = multer({ storage: storage });
+const upload = multer({
+    storage,
+    limits: { fileSize: MAX_UPLOAD_SIZE_BYTES },
+    fileFilter: (req, file, cb) => {
+        const extension = path.extname(file.originalname).toLowerCase();
+        if (!ALLOWED_EXTENSIONS.has(extension)) {
+            return cb(new Error('Unsupported file type. Upload a CSV or Excel file.'));
+        }
+        cb(null, true);
+    }
+});
 
 // In-memory storage for datasets (replaces MongoDB)
 const datasets = new Map();
@@ -102,12 +127,14 @@ app.post('/api/datasets/upload', upload.single('file'), async (req, res) => {
             });
         } catch (profileError) {
             console.error("Error profiling dataset:", profileError.message);
-            // Return dataset without profile if profiling fails
-            res.status(201).json({
-                _id: dataset._id,
-                filename: dataset.name,
-                fileSize: req.file.size,
-                profile: null
+            return res.status(502).json({
+                message: 'Dataset uploaded, but the profiling service is unavailable.',
+                details: profileError.response?.data?.detail || profileError.code || 'Unknown profiling error',
+                dataset: {
+                    _id: dataset._id,
+                    filename: dataset.name,
+                    fileSize: req.file.size
+                }
             });
         }
     } catch (error) {
@@ -241,7 +268,12 @@ app.post('/api/datasets/:id/clean', async (req, res) => {
         if (error.response) {
             console.error("Python service error data:", error.response.data);
         }
-        res.status(500).json({ message: error.response?.data?.detail || 'Error cleaning dataset' });
+        const upstreamMessage = error.response?.data?.detail || error.response?.data?.message;
+        const status = error.code === 'ECONNABORTED' ? 504 : 502;
+        res.status(status).json({
+            message: upstreamMessage || 'The cleaning service is unavailable.',
+            code: error.code || 'ML_SERVICE_ERROR'
+        });
     }
 });
 
@@ -269,6 +301,20 @@ app.get('/api/datasets/:id/profile', async (req, res) => {
         console.error("Error in profile route:", error.message);
         res.status(500).json({ message: 'Error generating profile' });
     }
+});
+
+app.use((error, req, res, next) => {
+    if (error instanceof multer.MulterError) {
+        if (error.code === 'LIMIT_FILE_SIZE') {
+            const sizeInMb = (MAX_UPLOAD_SIZE_BYTES / (1024 * 1024)).toFixed(0);
+            return res.status(413).json({ message: `File is too large. Maximum size is ${sizeInMb}MB.` });
+        }
+        return res.status(400).json({ message: `Upload failed: ${error.message}` });
+    }
+    if (error?.message?.startsWith('Unsupported file type')) {
+        return res.status(415).json({ message: error.message });
+    }
+    next(error);
 });
 
 app.listen(PORT, () => {

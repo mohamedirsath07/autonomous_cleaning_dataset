@@ -6,7 +6,7 @@ class ErrorBoundary extends React.Component {
     this.state = { hasError: false, error: null, errorInfo: null };
   }
 
-  static getDerivedStateFromError(error) {
+  static getDerivedStateFromError() {
     return { hasError: true };
   }
 
@@ -24,10 +24,10 @@ class ErrorBoundary extends React.Component {
         <div className="min-h-screen bg-black text-white p-8 flex flex-col items-center justify-center font-mono">
           <h1 className="text-2xl text-red-500 mb-4">Something went wrong.</h1>
           <div className="bg-gray-900 p-4 rounded-lg max-w-2xl w-full overflow-auto border border-gray-800">
-            <p className="text-[#ccff00] mb-2">Error: {this.state.error && this.state.error.toString()}</p>
-            <pre className="text-xs text-gray-400 whitespace-pre-wrap">
-              {this.state.errorInfo && this.state.errorInfo.componentStack}
-            </pre>
+            <p className="text-[#ccff00] mb-2">The application encountered an unexpected error.</p>
+            <p className="text-xs text-gray-400">
+              Reload the page and try again. If the problem continues, contact the project owner.
+            </p>
           </div>
           <button 
             onClick={() => window.location.reload()}

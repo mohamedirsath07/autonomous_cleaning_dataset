@@ -177,11 +177,13 @@ Autonomous_Data_Cleaning/
 
 ## 🚀 Quick Start
 
+> Deployment note: the frontend and Python service must be deployed as separate public services. The backend requires `PYTHON_SERVICE_URL` and `BACKEND_URL` to point to the live services, otherwise upload profiling and cleaning will fail in production.
+
 ### Prerequisites
 
 - **Node.js** v18+ 
 - **Python** 3.10+
-- **MongoDB** running on `localhost:27017`
+- A running Python ML service on `localhost:8000` or a deployed equivalent
 
 ### Installation
 
@@ -226,6 +228,25 @@ npm run dev
 Open your browser and navigate to: **http://localhost:5173**
 
 ---
+
+### Production environment variables
+
+Configure these on the backend deployment:
+
+```text
+PYTHON_SERVICE_URL=https://your-ml-service.example.com
+BACKEND_URL=https://your-backend.example.com
+MAX_UPLOAD_SIZE=50mb
+```
+
+Deploy `ml-service` as a separate Python web service with:
+
+```bash
+pip install -r requirements.txt
+uvicorn main:app --host 0.0.0.0 --port $PORT
+```
+
+The supported upload formats are `.csv`, `.xlsx`, and `.xls`. JSON is not currently supported.
 
 ## ⚙️ How It Works
 

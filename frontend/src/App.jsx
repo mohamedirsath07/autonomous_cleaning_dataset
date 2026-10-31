@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import {
   Upload,
@@ -98,10 +98,17 @@ const AutoKlean = () => {
 
       setDataset(response.data);
       setProfile(response.data.profile);
-      setLogs(prev => [...prev, "Upload complete.", "Profile generated successfully."]);
+      setLogs(prev => [
+        ...prev,
+        "Upload complete.",
+        response.data.profile
+          ? "Profile generated successfully."
+          : "Upload succeeded, but profiling was unavailable."
+      ]);
     } catch (error) {
       console.error("Upload error:", error);
-      setLogs(prev => [...prev, "Error uploading file. Please try again."]);
+      const message = error.response?.data?.message || "Error uploading file. Please try again.";
+      setLogs(prev => [...prev, message]);
     } finally {
       setIsProcessing(false);
     }
@@ -258,7 +265,7 @@ const AutoKlean = () => {
           <div className="mt-12 w-full max-w-2xl mx-auto group cursor-pointer relative">
             <input
               type="file"
-              accept=".csv,.json"
+              accept=".csv,.xlsx,.xls"
               onChange={handleFileChange}
               className="hidden"
               id="file-upload"
@@ -271,9 +278,9 @@ const AutoKlean = () => {
                 </div>
                 <div className="text-center">
                   <p className="text-lg font-bold text-white">
-                    {file ? file.name : 'Drop your .CSV or .JSON here'}
+                    {file ? file.name : 'Drop your .CSV or .Excel file here'}
                   </p>
-                  <p className="text-sm text-gray-500">Supports Pandas, NumPy, and SQL exports</p>
+                  <p className="text-sm text-gray-500">Supports CSV and Excel datasets</p>
                 </div>
               </div>
             </label>
